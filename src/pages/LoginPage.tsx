@@ -33,7 +33,7 @@ export default function LoginPage() {
           카카오로 시작하기
         </Button>
         {!isSupabaseConfigured && (
-          <ErrorText>Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았어요.</ErrorText>
+          <ErrorText>Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY)가 설정되지 않았어요.</ErrorText>
         )}
         <ErrorText>{error}</ErrorText>
       </div>
