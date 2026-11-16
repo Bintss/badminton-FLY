@@ -35,7 +35,7 @@ export default function ClubLayout() {
   const load = useCallback(async () => {
     if (!clubId || !session) return
     const [club, me] = await Promise.all([
-      supabase.from('clubs').select('id, name, created_at').eq('id', clubId).maybeSingle(),
+      supabase.from('clubs').select('id, name, created_at, timezone').eq('id', clubId).maybeSingle(),
       supabase.from('club_members').select('*').eq('club_id', clubId).eq('user_id', session.user.id).maybeSingle(),
     ])
     setState({ club: club.data as Club | null, me: me.data as ClubMember | null, loaded: true })

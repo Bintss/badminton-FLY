@@ -35,6 +35,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   already_canceled: '이미 취소한 신청이에요.',
   invalid_capacity: '정원은 1명 이상이어야 해요.',
   capacity_below_confirmed: '현재 확정 인원보다 적게 줄일 수 없어요.',
+  invalid_time: '시간을 확인해주세요. (시작은 미래, 끝은 시작보다 늦게, 오픈은 시작 전)',
+  invalid_court_count: '코트는 1면 이상이어야 해요.',
+  template_not_found: '정기운동을 찾을 수 없어요.',
+  already_open: '이미 투표가 열려서 오픈 시각은 바꿀 수 없어요.',
 }
 
 /** RPC 에러를 사용자에게 보여줄 문장으로 바꾼다. */

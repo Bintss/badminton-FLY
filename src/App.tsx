@@ -7,7 +7,9 @@ import ClubHomePage from './pages/ClubHomePage'
 import ClubsPage from './pages/ClubsPage'
 import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
+import FlashNewPage from './pages/FlashNewPage'
 import MembersAdminPage from './pages/MembersAdminPage'
+import TemplatesAdminPage from './pages/TemplatesAdminPage'
 
 function RequireAuth() {
   const { session, loading } = useAuth()
@@ -35,7 +37,9 @@ export default function App() {
             <Route path="/c/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubHomePage />} />
               <Route path="me" element={<MePage />} />
+              <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="admin/members" element={<MembersAdminPage />} />
+              <Route path="admin/templates" element={<TemplatesAdminPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

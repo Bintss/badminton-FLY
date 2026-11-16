@@ -14,8 +14,9 @@
 | M0 | 프로젝트 셋업, 카카오 로그인 | 완료 (실서버 카카오 로그인 확인) |
 | M1 | 스키마 전체 + RLS, 동아리 생성·가입 신청·승인, 운영진 지정, 이름·급수 | 완료 (SQL 테스트 41개) |
 | M2 | 신청·취소·정원 변경 RPC, 대기자 자동 승격, 동시 신청 부하 테스트 | 완료 (SQL 테스트 34개 + 동시성 검증 21개, DB만. 화면은 M4) |
-| M3 | 정기운동 템플릿 + pg_cron, 번개 개설 | 다음 |
-| M4~M6 | 투표 화면, 대진판, 파일럿 | 예정 |
+| M3 | 정기운동 템플릿 → 세션 자동 생성(pg_cron + 홈 진입 시), 번개 개설, 세션 수정/취소 RPC, 홈 일정 목록 | 완료 (SQL 테스트 34개) |
+| M4 | 투표 화면 (일정 상세, 신청·취소, 서버 시각 카운트다운, 세션 수정/취소 UI) | 다음 |
+| M5~M6 | 대진판, 파일럿 | 예정 |
 
 ## 폴더 구조
 
@@ -23,9 +24,12 @@
 supabase/
   migrations/20261116000000_init.sql          스키마 + RLS + 가입/승인 RPC
   migrations/20261116010000_registration.sql  신청/취소/정원 변경 RPC (M2)
+  migrations/20261116020000_sessions.sql      템플릿·세션 생성·번개·세션 수정/취소, 일정 목록 뷰 (M3)
+  migrations/20261116030000_cron.sql          pg_cron 매시간 세션 생성 (pg_cron 없으면 건너뜀)
   tests/local_stub.sql                 로컬 검증용 Supabase 스텁 (실서버 적용 금지)
   tests/m1_test.sql                    가입/승인/RLS 격리 테스트
   tests/m2_test.sql                    신청/취소/승격/정원 변경 테스트
+  tests/m3_test.sql                    세션 생성 규칙·번개·세션 관리·목록 뷰 테스트
   tests/run_local.sh                   로컬 Postgres로 마이그레이션 + 테스트 실행
   tests/load/run_load.sh               pgbench 동시 신청 테스트 (100명 동시)
 src/
@@ -41,6 +45,7 @@ src/
 1. Supabase 프로젝트 생성
 2. 마이그레이션 적용 (둘 중 하나). `supabase/migrations/`의 파일을 **이름 순서대로** 한 번씩
    - SQL Editor에 각 파일 내용을 붙여넣고 실행 (이미 실행한 파일은 다시 실행하지 않는다)
+   - `..._cron.sql` 전에 Database > Extensions에서 **pg_cron**을 켜 둔다 (안 켜도 홈 진입 시 생성되지만 cron이 있으면 아무도 안 들어와도 만들어진다)
    - 또는 CLI: `supabase link --project-ref <ref>` → `supabase db push`
 3. Authentication > URL Configuration
    - Site URL: `https://<github-id>.github.io/<repo>/`
@@ -89,11 +94,20 @@ npm run dev                  # http://localhost:5173
 
 ```bash
 # 로컬 Postgres 16 필요
-DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/run_local.sh        # 기능 (M1 41개 + M2 34개)
+DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/run_local.sh        # 기능 (M1 41 + M2 34 + M3 34개)
 DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/run_load.sh   # 동시성 (max_connections ≥ 150)
 ```
 
 로컬 스텁은 Supabase를 흉내 낸 것이라, 실서버 적용 후 앱에서 한 번 더 확인한다.
+
+### 정기운동 세션 생성 규칙 (M3)
+
+- 템플릿 = 요일 · 시작/끝 · 장소 · 정원 · 코트 수 · 투표 오픈 규칙(N일 전 HH:MM). 운영진이 설정·수정
+- 투표 오픈이 7일 이내로 다가온 미래 회차만 만든다. 시각은 동아리 시간대(`clubs.timezone`, 기본 Asia/Seoul) 기준
+- 생성 경로 3개(템플릿 저장 직후 · 홈 진입 시 `ensure_upcoming_sessions` · pg_cron 매시 5분), 모두 멱등
+- `template_slot`(원래 시작 시각) 유니크 → 운영진이 회차를 옮기거나 취소해도 같은 회차가 다시 생기지 않는다
+- 템플릿 수정은 이후 생성분부터. 이미 만든 회차는 일정별로 수정(`update_session`)
+- 오픈 시각은 투표가 열리기 전까지만 바꿀 수 있다
 
 ### 투표 동시성 설계 (M2)
 
