@@ -44,3 +44,29 @@ export function useServerNow(intervalMs = 30_000): number {
   }, [intervalMs])
   return now
 }
+
+/**
+ * 목표 시각까지 카운트다운용 훅. 남은 시간에 따라 갱신 주기를 바꾼다
+ * (1시간 이상: 30초, 1분 이상: 1초, 그 안: 100ms). 목표 시각이 지나면 30초 주기.
+ */
+export function useCountdownNow(targetMs: number): number {
+  const [now, setNow] = useState(serverNow)
+  useEffect(() => {
+    let alive = true
+    let timer: ReturnType<typeof setTimeout>
+    const tick = () => {
+      if (!alive) return
+      const n = serverNow()
+      setNow(n)
+      const left = targetMs - n
+      const wait = left > 3_600_000 ? 30_000 : left > 60_000 ? 1_000 : left > 0 ? 100 : 30_000
+      timer = setTimeout(tick, wait)
+    }
+    void syncServerClock().then(tick)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [targetMs])
+  return now
+}

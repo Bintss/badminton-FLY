@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
 import FlashNewPage from './pages/FlashNewPage'
 import MembersAdminPage from './pages/MembersAdminPage'
+import SessionPage from './pages/SessionPage'
 import TemplatesAdminPage from './pages/TemplatesAdminPage'
 
 function RequireAuth() {
@@ -38,6 +39,7 @@ export default function App() {
               <Route index element={<ClubHomePage />} />
               <Route path="me" element={<MePage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
+              <Route path="s/:sessionId" element={<SessionPage />} />
               <Route path="admin/members" element={<MembersAdminPage />} />
               <Route path="admin/templates" element={<TemplatesAdminPage />} />
             </Route>

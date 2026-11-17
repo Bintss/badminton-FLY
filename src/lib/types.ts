@@ -70,3 +70,19 @@ export interface SessionTemplate {
   open_time: string
   active: boolean
 }
+
+/** registrations + 신청자 이름 */
+export interface RegistrationRow {
+  id: string
+  session_id: string
+  kind: 'member' | 'guest'
+  user_id: string | null
+  guest_name: string | null
+  status: RegistrationStatus
+  seq: number
+  late_eta: string | null
+  checked_in_at: string | null
+  created_at: string
+  promoted_at: string | null
+  profiles: { display_name: string } | null
+}

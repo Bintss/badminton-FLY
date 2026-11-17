@@ -76,7 +76,8 @@ export default function ClubHomePage() {
           const phase = sessionPhase(s, now)
           const dim = phase === 'canceled'
           return (
-            <Card key={s.id} className={dim ? 'opacity-50' : ''}>
+            <Link key={s.id} to={`s/${s.id}`} className="block">
+            <Card className={`active:bg-neutral-50 ${dim ? 'opacity-50' : ''}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -103,10 +104,10 @@ export default function ClubHomePage() {
                 {s.my_status === 'waitlisted' && <Badge tone="amber">대기 중</Badge>}
               </div>
             </Card>
+            </Link>
           )
         })}
       </div>
-      {sessions && sessions.length > 0 && <p className="mt-3 text-center text-xs text-neutral-400">참석 신청 화면은 다음 단계(M4)에서 추가돼요.</p>}
 
       <nav className="mt-6 space-y-2">
         <Link to="me" className="block">
