@@ -26,6 +26,10 @@ self.addEventListener('push', (event) => {
     data = { title: 'FLY 배드민턴', body: event.data ? event.data.text() : '' }
   }
   const scope = self.registration.scope
+  // 홈 화면 앱 아이콘에 안 읽은 수 (서버가 badge로 보내줌, 지원하는 폰만)
+  if (typeof data.badge === 'number' && self.navigator && 'setAppBadge' in self.navigator) {
+    self.navigator.setAppBadge(data.badge).catch(() => {})
+  }
   event.waitUntil(
     self.registration.showNotification(data.title || 'FLY 배드민턴', {
       body: data.body || '',

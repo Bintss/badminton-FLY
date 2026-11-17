@@ -5,7 +5,7 @@ import { useClub } from '../club/ClubLayout'
 import { IconChevronLeft } from '../components/icons'
 import { PushCard } from '../components/PushCard'
 import { Empty, List, ListSkeleton, Page } from '../components/ui'
-import type { AppNotification } from '../lib/notifications'
+import { notifyUnreadChanged, type AppNotification } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
 
 const KIND_LABEL: Record<string, string> = {
@@ -51,7 +51,8 @@ export default function NotificationsPage() {
     void load().then((rows) => {
       const unread = (rows ?? []).filter((n) => !n.read_at).map((n) => n.id)
       setUnreadAtOpen(new Set(unread))
-      if (unread.length) void supabase.rpc('mark_notifications_read', { p_ids: null })
+      // 모두 읽음 처리가 끝나면 헤더 종·앱 아이콘 숫자를 바로 줄인다 (실시간 신호를 기다리지 않음)
+      if (unread.length) void supabase.rpc('mark_notifications_read', { p_ids: null }).then(() => notifyUnreadChanged())
     })
   }, [load])
 

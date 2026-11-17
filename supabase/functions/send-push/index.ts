@@ -53,6 +53,10 @@ Deno.serve(async (req) => {
 
     const userIds = [...new Set(batch.map((n: { user_id: string }) => n.user_id))]
     const { data: subs } = await supabase.from('push_subscriptions').select('id, user_id, endpoint, p256dh, auth').in('user_id', userIds)
+    // 사람별 안 읽은 알림 수 → 앱 아이콘 숫자
+    const { data: unreadRows } = await supabase.from('notifications').select('user_id').in('user_id', userIds).is('read_at', null)
+    const unread = new Map<string, number>()
+    for (const r of unreadRows ?? []) unread.set(r.user_id, (unread.get(r.user_id) ?? 0) + 1)
     const byUser = new Map<string, { id: string; endpoint: string; p256dh: string; auth: string }[]>()
     for (const s of subs ?? []) byUser.set(s.user_id, [...(byUser.get(s.user_id) ?? []), s])
 
@@ -66,9 +70,11 @@ Deno.serve(async (req) => {
         const payload = JSON.stringify({
           title: n.title,
           body: n.body,
-          url: appUrl + n.url,
+          // 누르면 그 화면을 열면서 이 알림을 읽음 처리 (?read=알림번호)
+          url: `${appUrl}${n.url}${n.url.includes('?') ? '&' : '?'}read=${n.id}`,
           // 같은 운동·같은 종류 알림은 폰 알림센터에서 하나로 합쳐진다
           tag: `${n.kind}:${n.session_id ?? n.id}`,
+          badge: unread.get(n.user_id) ?? 0,
         })
         const targets = byUser.get(n.user_id) ?? []
         if (targets.length === 0) {

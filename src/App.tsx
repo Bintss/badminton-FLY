@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { ToastProvider } from './components/toast'
 import BoardEntryPage from './pages/BoardEntryPage'
@@ -7,6 +8,8 @@ import ClubEditPage from './pages/ClubEditPage'
 import ClubLayout from './club/ClubLayout'
 import { Page, Spinner } from './components/ui'
 import { getLastClubId } from './lib/lastClub'
+import { notifyUnreadChanged } from './lib/notifications'
+import { supabase } from './lib/supabase'
 import BoardPage from './pages/BoardPage'
 import ClubHomePage from './pages/ClubHomePage'
 import ClubsPage from './pages/ClubsPage'
@@ -24,7 +27,27 @@ function RequireAuth() {
   const { session, loading } = useAuth()
   if (loading) return <Page><Spinner /></Page>
   if (!session) return <Navigate to="/login" replace />
-  return <Outlet />
+  return (
+    <>
+      <ReadFromPush />
+      <Outlet />
+    </>
+  )
+}
+
+/** 폰 알림을 눌러 들어온 경우(?read=알림번호): 그 알림을 읽음 처리하고 주소에서 지운다 → 종·앱 아이콘 숫자가 줄어든다 */
+function ReadFromPush() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const id = Number(params.get('read'))
+    if (!Number.isInteger(id) || id <= 0) return
+    params.delete('read')
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : '' }, { replace: true })
+    void supabase.rpc('mark_notifications_read', { p_ids: [id] }).then(() => notifyUnreadChanged())
+  }, [location.search, location.pathname, navigate])
+  return null
 }
 
 /** 루트: 마지막 동아리가 있으면 거기로, 없으면 동아리 선택 (승인 여부는 ClubLayout이 다시 확인) */
