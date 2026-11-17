@@ -15,3 +15,42 @@ self.addEventListener('fetch', (event) => {
     fetch(event.request).catch(() => new Response(OFFLINE_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
   )
 })
+
+// ── 웹 푸시 ────────────────────────────────────────────────────
+// 서버(send-push)가 보낸 {title, body, url, tag}를 알림으로 띄운다
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    data = { title: 'FLY 배드민턴', body: event.data ? event.data.text() : '' }
+  }
+  const scope = self.registration.scope
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'FLY 배드민턴', {
+      body: data.body || '',
+      icon: scope + 'icons/icon-192.png',
+      badge: scope + 'icons/icon-192.png',
+      tag: data.tag,
+      renotify: Boolean(data.tag),
+      data: { url: data.url || scope },
+    }),
+  )
+})
+
+// 알림을 누르면: 이미 열린 앱 창이 있으면 그 창을 그 화면으로, 없으면 새로 연다
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || self.registration.scope
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) {
+        if (w.url.startsWith(self.registration.scope) && 'focus' in w) {
+          w.navigate(url).catch(() => {})
+          return w.focus()
+        }
+      }
+      return self.clients.openWindow(url)
+    }),
+  )
+})

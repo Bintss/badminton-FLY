@@ -22,7 +22,8 @@
 | T1 | 자체대회: 운영진이 홈에서 따로 만들기, 대진 자동 초안(게임 수 균등·파트너 반복 최소·급수로 팀 실력 맞춤) + 탭 두 번으로 자리 바꾸기, 초안 비공개 → 확정 즉시 공개, 대회 경기 우선 코트 배정(4명 도착 기준), 대회 중 자율 경기 차단, 선수 교체, 일찍 끝내기, 끝나면 자율 대진 | 완료 (SQL 테스트 69개, 30명·6코트·5매치 전체 진행 검증) |
 | T2 | 대회 경기 점수: 경기 종료와 함께 입력(나중에 입력 가능), 듀스·최대 점수 규칙 검증, 두 폰 동시 수정 충돌 방지, 기권승·기권 처리, 대진표 결과·내 전적 | 완료 (SQL 테스트 46개 + 앱·서버 점수 규칙 5,184가지 일치 확인) |
 | T3 | 대회 명단 관리: 운영진 회원 추가(정원 자동 증가)·빼기(대기 승격)·대기자 바로 확정·게스트 미리 추가(성별·급수), 명단 변경 안내, 취소 시 대회 경기 수 경고, 교체 후보 추천 순 | 완료 (SQL 테스트 26개) |
-| T5 | 교류전 (동아리별 승리 경기 수 요약 포함) | 설계 완료, 다음 |
+| 알림 | 가입 신청·승인, 새 운동 투표, 투표 10분 전, 코트 배정. 웹 푸시 + 앱 안 알림함, 종류별 끄기 | 완료 (SQL 테스트 34개). 푸시 발송은 Edge Function 배포 후 실제 폰에서 확인 필요 |
+| T5 | 교류전 (동아리별 승리 경기 수 요약 포함) | 설계 완료, 나중에 |
 | M6 | 파일럿 | 다음 |
 
 ## 폴더 구조
@@ -47,6 +48,8 @@ supabase/
   tests/m9_member_removal_test.sql     내보내기·강퇴·나가기·동아리 삭제 테스트
   tests/m10_scores_test.sql            대회 점수(T2) 테스트
   tests/m11_roster_test.sql            대회 명단 관리(T3) 테스트
+  tests/m12_notifications_test.sql     알림 테스트
+supabase/functions/send-push/        웹 푸시 보내기 (Edge Function)
   tests/run_local.sh                   로컬 Postgres로 마이그레이션 + 테스트 실행
   tests/load/run_load.sh               pgbench 동시 신청 테스트 (100명 동시)
 src/
@@ -211,6 +214,55 @@ DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/r
 - 대진을 짠 뒤 새로 들어온 사람이 있으면 대진 짜기에 `명단이 바뀌었어요` 안내
 - 대진 확정 후 참석 취소 확인 창에 `대회 경기 n개에 들어 있어요`. 그 경기는 선수 교체 전까지 코트에 안 들어감
 - 선수 교체 후보는 대회 경기가 적은 사람 → 빠지는 사람과 실력이 비슷한 사람 순
+
+### 알림 (웹 푸시 + 앱 안 알림함)
+
+| 종류 | 받는 사람 | 시점 |
+|---|---|---|
+| 가입 신청 | 그 동아리 운영진 | 가입 신청이 들어왔을 때 |
+| 가입 승인 | 신청한 본인 | 승인됐을 때 |
+| 새 운동 투표 | 동아리 회원 전체 (만든 사람 제외) | 정기운동 자동 생성(투표 오픈 7일 전)·번개·자체대회가 생겼을 때 |
+| 투표 10분 전 | 동아리 회원 전체 | 투표 오픈 10분 전 (매분 도는 예약 작업) |
+| 코트 배정 | 그 경기의 회원 선수 | 내 경기가 코트에 들어갔을 때 (자율·대회) |
+
+- 모든 알림은 앱 안 알림함(헤더의 종)에 쌓이고, 알림을 켠 기기에는 웹 푸시로도 간다
+- 내 정보 → 알림에서 기기 알림 켜기/끄기, 받을 종류 고르기 (계정 기준)
+- 아이폰은 사파리에서 "홈 화면에 추가"한 앱에서만 푸시 가능 (iOS 16.4+). 카카오톡 안 브라우저는 푸시 불가 → 알림함으로 확인
+- 알림 저장이 실패해도 가입·운동 생성·코트 배정 같은 원래 작업은 그대로 진행된다
+- 흐름: 이벤트 → `notifications` 행 → DB 트리거가 `pg_net`으로 Edge Function `send-push` 호출 → 웹 푸시. 매분 예약 작업이 10분 전 알림을 만들고 못 보낸 푸시를 다시 보낸다
+
+#### 알림 설정 (처음 한 번, 운영자)
+
+1. SQL Editor에서 `supabase/migrations/20261118010000_notifications.sql` 실행
+2. Database → Extensions에서 **pg_net**, **pg_cron** 켜기. 1번보다 나중에 켰다면 SQL Editor에서 한 번 더:
+   ```sql
+   select cron.schedule('notifications-tick', '* * * * *', 'select public.notifications_tick()');
+   ```
+3. 키 만들기 (내 컴퓨터 터미널)
+   ```bash
+   npx web-push generate-vapid-keys      # Public Key, Private Key가 나온다
+   openssl rand -hex 32                  # PUSH_SECRET으로 쓸 임의 문자열
+   ```
+4. Edge Function 배포 (레포 폴더에서)
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <프로젝트 ref>     # 대시보드 주소 /project/<ref>
+   npx supabase secrets set VAPID_PUBLIC_KEY=<Public Key> VAPID_PRIVATE_KEY=<Private Key> \
+     VAPID_SUBJECT=mailto:<운영진 메일> PUSH_SECRET=<3번 임의 문자열> APP_URL=https://bintss.github.io/badminton-FLY
+   npx supabase functions deploy send-push --no-verify-jwt
+   ```
+   Private Key와 PUSH_SECRET은 저장소·앱 코드에 넣지 않는다 (Supabase 비밀값에만)
+5. SQL Editor에서 DB가 함수를 부를 수 있게 Vault에 저장
+   ```sql
+   select vault.create_secret('https://<프로젝트 ref>.supabase.co/functions/v1/send-push', 'push_function_url');
+   select vault.create_secret('<3번 PUSH_SECRET>', 'push_secret');
+   select vault.create_secret('<Public Key>', 'vapid_public_key');   -- 공개 키 (앱이 읽어감)
+   ```
+6. 확인: 앱 → 내 정보 → 알림 켜기. 그다음 SQL Editor에서 나에게 테스트 알림
+   ```sql
+   select public.notify((select id from auth.users where email = '<내 카카오 메일>'), null, null, 'vote_created', '테스트 알림', '알림이 잘 와요', '/clubs');
+   ```
+   폰에 알림이 오면 끝. 안 오면 `select id, push_error, pushed_at from notifications order by id desc limit 5;`와 Edge Functions → send-push → Logs 확인
 
 ### 회원 내보내기·강퇴, 동아리 나가기·삭제
 

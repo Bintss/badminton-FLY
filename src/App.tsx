@@ -15,6 +15,7 @@ import MePage from './pages/MePage'
 import FlashNewPage from './pages/FlashNewPage'
 import MembersAdminPage from './pages/MembersAdminPage'
 import SessionPage from './pages/SessionPage'
+import NotificationsPage from './pages/NotificationsPage'
 import TemplatesAdminPage from './pages/TemplatesAdminPage'
 import TournamentNewPage from './pages/TournamentNewPage'
 import TournamentPage from './pages/TournamentPage'
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="admin/club" element={<ClubEditPage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="tournament/new" element={<TournamentNewPage />} />
+              <Route path="notifications" element={<NotificationsPage />} />
               <Route path="s/:sessionId" element={<SessionPage />} />
               <Route path="s/:sessionId/board" element={<BoardPage />} />
               <Route path="s/:sessionId/tournament" element={<TournamentPage />} />

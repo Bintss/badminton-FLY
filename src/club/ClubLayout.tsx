@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { Link, Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
-import { IconCalendar, IconCourt, IconPerson } from '../components/icons'
+import { IconBell, IconCalendar, IconCourt, IconPerson } from '../components/icons'
+import { useUnreadCount } from '../lib/notifications'
+import { syncPushSubscription } from '../lib/push'
 import { useAuth } from '../auth/AuthProvider'
 import { Page, Spinner } from '../components/ui'
 import { setLastClubId } from '../lib/lastClub'
@@ -49,6 +51,11 @@ export default function ClubLayout() {
     void load()
   }, [load])
 
+  // 이 기기에 알림이 켜져 있으면 지금 로그인한 계정으로 구독을 맞춘다
+  useEffect(() => {
+    if (session) void syncPushSubscription()
+  }, [session])
+
   const allowed = Boolean(state.club && state.me?.status === 'approved')
 
   useEffect(() => {
@@ -72,11 +79,31 @@ export default function ClubLayout() {
             <ClubLogo club={state.club} size={28} />
             <span className="truncate text-[15px] font-bold text-court-700">{state.club.name}</span>
           </Link>
+          <Bell clubId={state.club.id} />
         </div>
       </header>
       <Outlet />
       <TabBar clubId={state.club.id} />
     </ClubContext.Provider>
+  )
+}
+
+/** 헤더 오른쪽 알림 종: 안 읽은 알림 수 */
+function Bell({ clubId }: { clubId: string }) {
+  const unread = useUnreadCount()
+  return (
+    <Link
+      to={`/c/${clubId}/notifications`}
+      aria-label={unread ? `알림 ${unread}개 안 읽음` : '알림'}
+      className="relative -mr-2 ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft active:bg-black/5"
+    >
+      <IconBell className="h-6 w-6" />
+      {unread > 0 && (
+        <span className="absolute right-1 top-1.5 min-w-[18px] rounded-full bg-danger px-1 text-center text-[11px] font-bold leading-[18px] text-white">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </Link>
   )
 }
 

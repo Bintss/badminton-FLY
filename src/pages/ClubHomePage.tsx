@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
+import { PushCard } from '../components/PushCard'
 import { IconPlus } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Empty, ListSkeleton, Page } from '../components/ui'
@@ -53,6 +54,23 @@ export default function ClubHomePage() {
     return phase !== 'ended' && phase !== 'canceled'
   })
 
+  // 홈 위 '알림 받기' 안내: 닫으면 이 기기에서 다시 안 보임 (내 정보에서 언제든 켤 수 있음)
+  const [pushPromptHidden, setPushPromptHidden] = useState(() => {
+    try {
+      return localStorage.getItem('push-prompt-hidden') === '1'
+    } catch {
+      return false
+    }
+  })
+  const hidePushPrompt = () => {
+    setPushPromptHidden(true)
+    try {
+      localStorage.setItem('push-prompt-hidden', '1')
+    } catch {
+      /* 저장 못 해도 이번에는 숨김 */
+    }
+  }
+
   return (
     <Page
       title="일정"
@@ -71,6 +89,11 @@ export default function ClubHomePage() {
         </div>
       }
     >
+      {!pushPromptHidden && (
+        <div className="mb-3">
+          <PushCard compact onDismiss={hidePushPrompt} />
+        </div>
+      )}
       {!sessions && <ListSkeleton rows={3} />}
       {visible?.length === 0 && (
         <Empty title="예정된 운동이 없어요">

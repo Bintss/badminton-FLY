@@ -4,6 +4,8 @@ import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input } from '../components/form'
 import { ConfirmButton } from '../components/ConfirmButton'
+import { PushCard } from '../components/PushCard'
+import { NOTIFICATION_KINDS, type NotificationKind } from '../lib/push'
 import { GenderToggle } from '../components/GenderToggle'
 import { setLastClubId } from '../lib/lastClub'
 import { LevelPicker } from '../components/LevelPicker'
@@ -101,6 +103,10 @@ export default function MePage() {
         </>
       )}
 
+      <SectionTitle>알림</SectionTitle>
+      <PushCard />
+      <NotificationPrefs isAdmin={isAdmin} />
+
       <SectionTitle>계정</SectionTitle>
       <List>
         <MenuRow to={`/c/${club.id}/about`} label="동아리 소개" sub="장소, 정기운동, 연락 링크" />
@@ -137,5 +143,59 @@ function MenuRow({ to, label, sub, badge }: { to: string; label: string; sub?: s
         <IconChevronRight className="h-4 w-4 shrink-0" />
       </span>
     </Link>
+  )
+}
+
+/** 받을 알림 종류 (기기와 상관없이 계정 기준, 앱 안 알림함에도 적용) */
+function NotificationPrefs({ isAdmin }: { isAdmin: boolean }) {
+  const toast = useToast()
+  const [muted, setMuted] = useState<Set<string> | null>(null)
+
+  useEffect(() => {
+    supabase
+      .from('notification_mutes')
+      .select('kind')
+      .then(({ data }) => setMuted(new Set((data ?? []).map((r) => r.kind as string))))
+  }, [])
+
+  const toggle = async (kind: NotificationKind, enabled: boolean) => {
+    setMuted((m) => {
+      const next = new Set(m)
+      if (enabled) next.delete(kind)
+      else next.add(kind)
+      return next
+    })
+    const { error } = await supabase.rpc('set_notification_pref', { p_kind: kind, p_enabled: enabled })
+    if (error) toast.error(errorMessage(error))
+  }
+
+  if (!muted) return null
+  return (
+    <List className="mt-3">
+      {NOTIFICATION_KINDS.filter((k) => isAdmin || k.kind !== 'join_request').map((k) => {
+        const on = !muted.has(k.kind)
+        return (
+          <label key={k.kind} className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium text-ink">{k.label}</span>
+              <span className="block text-xs text-ink-faint">{k.hint}</span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              checked={on}
+              onChange={(e) => void toggle(k.kind, e.target.checked)}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden
+              className={`relative h-7 w-12 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-court-500 ${on ? 'bg-court-600' : 'bg-black/15'}`}
+            >
+              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+            </span>
+          </label>
+        )
+      })}
+    </List>
   )
 }
