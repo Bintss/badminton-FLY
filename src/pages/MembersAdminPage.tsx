@@ -3,6 +3,7 @@ import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { IconChevronLeft } from '../components/icons'
+import { GenderToggle } from '../components/GenderToggle'
 import { useToast } from '../components/toast'
 import { Badge, Button, Empty, ErrorText, List, ListSkeleton, Page, SectionTitle } from '../components/ui'
 import { errorMessage, supabase } from '../lib/supabase'
@@ -47,6 +48,16 @@ export default function MembersAdminPage() {
     if (error) setError(errorMessage(error))
     else toast.success(approve ? '가입을 승인했어요' : '가입을 거절했어요')
     await load()
+    setBusy(null)
+  }
+
+  const setGender = async (userId: string, gender: 'M' | 'F' | null) => {
+    setBusy(userId)
+    setError('')
+    const { error } = await supabase.rpc('set_member_gender', { p_club: club.id, p_user: userId, p_gender: gender })
+    if (error) setError(errorMessage(error))
+    await load()
+    if (userId === session?.user.id) await reloadClub()
     setBusy(null)
   }
 
@@ -96,11 +107,12 @@ export default function MembersAdminPage() {
       <List>
         {approved.map((m) => (
           <div key={m.user_id} className="flex items-center justify-between gap-2 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="truncate font-medium text-ink">{m.profiles?.display_name ?? '이름 없음'}</span>
               {m.role === 'admin' && <Badge tone="court">운영진</Badge>}
               {m.level && <Badge tone="outline">{m.level}</Badge>}
             </div>
+            <GenderToggle compact value={m.gender} disabled={busy === m.user_id} label={`${m.profiles?.display_name ?? ''} 성별`} onChange={(g) => void setGender(m.user_id, g)} />
             <button
               className="shrink-0 rounded-lg px-2 py-1 text-sm font-medium text-ink-soft active:bg-floor disabled:opacity-40"
               disabled={busy === m.user_id}

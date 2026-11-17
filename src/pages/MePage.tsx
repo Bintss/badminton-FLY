@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input } from '../components/form'
+import { GenderToggle } from '../components/GenderToggle'
 import { IconChevronRight } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, List, Page, SectionTitle } from '../components/ui'
@@ -14,6 +15,7 @@ export default function MePage() {
   const toast = useToast()
   const [name, setName] = useState(profile?.display_name ?? '')
   const [level, setLevel] = useState(me.level ?? '')
+  const [gender, setGender] = useState(me.gender ?? null)
   const [busy, setBusy] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
 
@@ -27,7 +29,7 @@ export default function MePage() {
       .then(({ count }) => setPendingCount(count ?? 0))
   }, [club.id, isAdmin])
 
-  const dirty = name.trim() !== (profile?.display_name ?? '') || level.trim() !== (me.level ?? '')
+  const dirty = name.trim() !== (profile?.display_name ?? '') || level.trim() !== (me.level ?? '') || gender !== (me.gender ?? null)
 
   const save = async (e: FormEvent) => {
     e.preventDefault()
@@ -35,9 +37,10 @@ export default function MePage() {
     setBusy(true)
     const nameRes = await supabase.from('profiles').update({ display_name: name.trim() }).eq('id', session.user.id)
     const levelRes = await supabase.rpc('set_my_level', { p_club: club.id, p_level: level })
+    const genderRes = await supabase.rpc('set_my_gender', { p_club: club.id, p_gender: gender })
     setBusy(false)
-    if (nameRes.error || levelRes.error) {
-      toast.error(errorMessage(nameRes.error ?? levelRes.error))
+    if (nameRes.error || levelRes.error || genderRes.error) {
+      toast.error(errorMessage(nameRes.error ?? levelRes.error ?? genderRes.error))
       return
     }
     await Promise.all([refreshProfile(), reload()])
@@ -51,8 +54,13 @@ export default function MePage() {
           <Field label="이름" hint="모든 동아리에서 같은 이름으로 보여요.">
             <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} />
           </Field>
-          <Field label={`급수 (${club.name})`} hint="표시용이에요. 대진에는 쓰이지 않아요.">
+          <Field label={`급수 (${club.name})`} hint="자체대회 자동 대진에서 두 팀 실력을 맞출 때 써요. (A~D조, 초심)">
             <Input value={level} onChange={(e) => setLevel(e.target.value)} maxLength={10} placeholder="예: D조, 초심" />
+          </Field>
+          <Field label="성별" asGroup hint="자체대회에서 혼복·남복·여복을 짤 때 써요.">
+            <div>
+              <GenderToggle value={gender} onChange={setGender} />
+            </div>
           </Field>
           <Button type="submit" className="w-full" disabled={busy || !name.trim() || !dirty}>
             저장

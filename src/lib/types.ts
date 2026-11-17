@@ -34,6 +34,8 @@ export interface ClubMember {
   role: MemberRole
   status: MemberStatus
   level: string | null
+  /** 'M' 남 / 'F' 여 / null 미입력 */
+  gender: 'M' | 'F' | null
   requested_at: string
 }
 

@@ -9,7 +9,8 @@ import { IconChevronLeft, IconPlus, IconX } from '../components/icons'
 import { Sheet } from '../components/Sheet'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
-import { autoDraft, draftNotes, levelScore } from '../lib/autoDraft'
+import { KIND_LABEL, autoDraft, draftNotes, gameKind, levelScore, type Gender, type GameKind } from '../lib/autoDraft'
+import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { errorMessage, supabase } from '../lib/supabase'
 import {
   SCHEDULED_COLUMNS,
@@ -34,6 +35,7 @@ interface Reg {
   kind: 'member' | 'guest'
   user_id: string | null
   guest_name: string | null
+  guest_gender: Gender | null
   status: RegistrationStatus
   seq: number
   checked_in_at: string | null
@@ -51,6 +53,9 @@ interface Roster {
   levelOf: (id: string) => string | undefined
   /** 급수 글자로 정한 실력 점수 1~5 (게스트·모르는 급수 3) */
   scoreOf: (id: string) => number
+  genderOf: (id: string) => Gender | null
+  /** 회원은 동아리 성별, 게스트는 신청의 성별을 바꾼다 (운영진) */
+  setGender: (id: string, g: Gender | null) => Promise<void>
   isConfirmed: (id: string) => boolean
 }
 
@@ -65,6 +70,7 @@ export default function TournamentPage() {
   const [regs, setRegs] = useState<Reg[]>([])
   const [matches, setMatches] = useState<MatchWithPhase[]>([])
   const [levels, setLevels] = useState<Record<string, string>>({})
+  const [genders, setGenders] = useState<Record<string, Gender>>({})
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
@@ -73,7 +79,7 @@ export default function TournamentPage() {
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
         .from('registrations')
-        .select('id, kind, user_id, guest_name, status, seq, checked_in_at, profiles!registrations_user_id_fkey(display_name)')
+        .select('id, kind, user_id, guest_name, guest_gender, status, seq, checked_in_at, profiles!registrations_user_id_fkey(display_name)')
         .eq('session_id', sessionId)
         .order('seq'),
       // 대회 경기 전부 + (다른 코트에서 경기 중인지 알기 위해) 진행 중인 자율 경기
@@ -97,18 +103,20 @@ export default function TournamentPage() {
     void load()
   }, [load])
 
-  useEffect(() => {
-    supabase
-      .from('club_members')
-      .select('user_id, level')
-      .eq('club_id', club.id)
-      .eq('status', 'approved')
-      .then(({ data }) => {
-        const map: Record<string, string> = {}
-        for (const m of data ?? []) if (m.level) map[m.user_id as string] = m.level as string
-        setLevels(map)
-      })
+  const loadMembers = useCallback(async () => {
+    const { data } = await supabase.from('club_members').select('user_id, level, gender').eq('club_id', club.id).eq('status', 'approved')
+    const lv: Record<string, string> = {}
+    const gd: Record<string, Gender> = {}
+    for (const m of data ?? []) {
+      if (m.level) lv[m.user_id as string] = m.level as string
+      if (m.gender) gd[m.user_id as string] = m.gender as Gender
+    }
+    setLevels(lv)
+    setGenders(gd)
   }, [club.id])
+  useEffect(() => {
+    void loadMembers()
+  }, [loadMembers])
 
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
@@ -150,8 +158,23 @@ export default function TournamentPage() {
         const u = byId[id]?.user_id
         return levelScore(u ? levels[u] : null)
       },
+      genderOf: (id) => {
+        const r = byId[id]
+        if (!r) return null
+        return r.kind === 'guest' ? r.guest_gender : r.user_id ? (genders[r.user_id] ?? null) : null
+      },
+      setGender: async (id, g) => {
+        const r = byId[id]
+        if (!r) return
+        const { error } =
+          r.kind === 'guest'
+            ? await supabase.rpc('set_guest_gender', { p_registration: id, p_gender: g })
+            : await supabase.rpc('set_member_gender', { p_club: club.id, p_user: r.user_id, p_gender: g })
+        if (error) toast.error(errorMessage(error))
+        await Promise.all([load(), loadMembers()])
+      },
     }
-  }, [regs, levels])
+  }, [regs, levels, genders, club.id, toast, load, loadMembers])
 
   const scheduled = useMemo(() => matches.filter((m) => m.phase === 'scheduled'), [matches])
 
@@ -329,7 +352,9 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
 
   const confirmedIds = useMemo(() => roster.confirmed.map((r) => r.id), [roster.confirmed])
   const check = checkDrafts(drafts, confirmedIds, rounds)
-  const notes = draftNotes(drafts, roster.scoreOf)
+  const notes = draftNotes(drafts, roster.scoreOf, roster.genderOf)
+  const noGender = roster.confirmed.filter((p) => !roster.genderOf(p.id))
+  const anyGender = roster.confirmed.some((p) => roster.genderOf(p.id))
   const blocked = check.partial > 0 || check.outOfRange > 0 || check.stale > 0
   const blockedText =
     check.stale > 0
@@ -347,7 +372,11 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
   }
 
   const generate = () => {
-    const players = roster.confirmed.map((p) => ({ id: p.id, score: roster.scoreOf(p.id) }))
+    if (anyGender && noGender.length > 0) {
+      toast.error(`성별이 없는 ${noGender.length}명의 성별을 먼저 정해주세요`)
+      return
+    }
+    const players = roster.confirmed.map((p) => ({ id: p.id, score: roster.scoreOf(p.id), gender: roster.genderOf(p.id) }))
     const next = autoDraft(players, rounds, s.court_count, Math.floor(Math.random() * 2 ** 31))
     if (next.length === 0) {
       toast.error('참석자가 4명 이상이어야 대진을 짤 수 있어요')
@@ -355,7 +384,11 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
     }
     setSel(null)
     update(() => withEmptyRounds(next, rounds, perRound))
-    toast.success(`${next.length}경기를 짰어요. 바꿀 사람은 눌러서 자리를 바꾸세요`)
+    const played = new Set(next.flatMap(draftPlayers))
+    const zero = roster.confirmed.filter((p) => !played.has(p.id))
+    if (zero.length > 0)
+      toast.info(`${zero.map((p) => roster.nameOf(p.id)).join(', ')}님은 성별 인원이 맞지 않아 경기가 없어요. 직접 넣어주세요`)
+    else toast.success(`${next.length}경기를 짰어요. 바꿀 사람은 눌러서 자리를 바꾸세요`)
   }
 
   const slotValue = (ds: DraftMatch[], p: Extract<Pos, { kind: 'slot' }>) => {
@@ -419,7 +452,11 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
   const selName = sel ? (sel.kind === 'bench' ? roster.nameOf(sel.id) : slotValue(drafts, sel) ? roster.nameOf(slotValue(drafts, sel)!) : '빈 자리') : null
 
   const roundIssue = (r: number) =>
-    drafts.some((d) => d.round === r && ((notes[d.key]?.partnerRepeat ?? false) || (draftPlayers(d).length > 0 && draftPlayers(d).length < 4)))
+    drafts.some(
+      (d) =>
+        d.round === r &&
+        ((notes[d.key]?.partnerRepeat ?? false) || notes[d.key]?.kind === 'invalid' || (draftPlayers(d).length > 0 && draftPlayers(d).length < 4)),
+    )
 
   return (
     <>
@@ -444,8 +481,27 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
       {!hasAnyone && (
         <p className="mb-4 rounded-xl bg-floor px-3 py-3 text-[13px] leading-relaxed text-ink-soft">
           자동으로 짜기를 누르면 참석자 {roster.confirmed.length}명의 게임 수를 똑같이 맞추고, 같은 파트너를 피하고, 급수로 두 팀 실력을 맞춘 대진을
-          만들어요. 직접 짜려면 빈 자리를 누르고 아래 쉬는 사람을 누르세요.
+          만들어요. 성별이 있으면 모든 경기를 혼복·남복·여복 중 하나로, 한 사람이 같은 종목만 하지 않게 골고루 섞어요. 직접 짜려면 빈 자리를 누르고 아래
+          쉬는 사람을 누르세요.
         </p>
+      )}
+
+      {anyGender && noGender.length > 0 && (
+        <Card className="mb-4">
+          <h3 className="text-[15px] font-bold text-ink">성별이 없는 참석자 {noGender.length}명</h3>
+          <p className="mt-1 text-[13px] text-ink-soft">혼복·남복·여복을 맞추려면 모두 성별이 있어야 해요. 여기서 정하면 회원 정보에도 저장돼요.</p>
+          <div className="mt-2 divide-y divide-black/[0.06]">
+            {noGender.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2 py-2">
+                <span className="truncate text-[15px] font-semibold text-ink">
+                  {roster.nameOf(p.id)}
+                  {p.kind === 'guest' && <span className="ml-1 text-xs font-medium text-ink-faint">게스트</span>}
+                </span>
+                <GenderToggle compact value={null} allowClear={false} label={`${roster.nameOf(p.id)} 성별`} onChange={(g) => void roster.setGender(p.id, g)} />
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {/* 매치 탭 */}
@@ -513,6 +569,8 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
               </div>
               {note && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-8 text-xs">
+                  {note.kind && note.kind !== 'invalid' && <KindBadge kind={note.kind} />}
+                  {note.kind === 'invalid' && <span className="rounded-md bg-danger/10 px-1.5 py-0.5 font-semibold text-danger">종목 안 맞음</span>}
                   <span className={diff >= 2 ? 'font-semibold text-shuttle-800' : 'text-ink-faint'}>
                     실력 {note.sum1} : {note.sum2}
                   </span>
@@ -550,6 +608,7 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
                   samePos(sel, pos) ? 'bg-court-600 text-white' : 'bg-white text-ink ring-1 ring-black/[0.08] active:bg-floor'
                 }`}
               >
+                {!samePos(sel, pos) && <GenderMark g={roster.genderOf(p.id)} />}
                 {roster.nameOf(p.id)}
                 {roster.levelOf(p.id) && <span className={`text-xs font-medium ${samePos(sel, pos) ? 'text-white/75' : 'text-ink-faint'}`}>{roster.levelOf(p.id)}</span>}
                 <span className={`score text-[14px] ${samePos(sel, pos) ? 'text-white/80' : 'text-ink-faint'}`}>{check.counts[p.id] ?? 0}</span>
@@ -619,6 +678,7 @@ function PersonChip({ id, roster, selected, target, onClick }: { id: string | nu
               : `${target ? 'bg-court-50 ring-1 ring-court-500/40' : 'bg-floor'} text-ink`
       }`}
     >
+      {id && !selected && <GenderMark g={roster.genderOf(id)} className="mr-1" />}
       {id ? roster.nameOf(id) : '빈 자리'}
       {id && roster.levelOf(id) && <span className={`ml-1 text-xs font-medium ${selected ? 'text-white/75' : 'text-ink-faint'}`}>{roster.levelOf(id)}</span>}
     </button>
@@ -785,6 +845,10 @@ function ScheduleView({
                         )}
                         {reason && <p className="mt-0.5 text-xs text-shuttle-800">{reason}</p>}
                       </div>
+                      {(() => {
+                        const k = gameKind([...t1, ...t2].map(roster.genderOf))
+                        return k && k !== 'invalid' ? <KindBadge kind={k} /> : null
+                      })()}
                       <StatusBadge m={m} />
                       {editable && (
                         <ConfirmButton
@@ -852,6 +916,11 @@ function Joined({ parts }: { parts: ReactNode[] }) {
       ))}
     </>
   )
+}
+
+function KindBadge({ kind }: { kind: GameKind }) {
+  const tone = kind === 'MD' ? 'bg-sky-50 text-sky-700' : kind === 'WD' ? 'bg-rose-50 text-rose-600' : 'bg-violet-50 text-violet-700'
+  return <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold ${tone}`}>{KIND_LABEL[kind]}</span>
 }
 
 function StatusBadge({ m }: { m: ScheduledMatch }) {
