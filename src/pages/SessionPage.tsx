@@ -435,7 +435,7 @@ function LateEta({
         <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center justify-between text-left">
           <span>
             <span className="block text-[15px] font-semibold text-ink">늦게 도착하나요?</span>
-            <span className="block text-[13px] text-ink-soft">도착 시각을 남기면 대진 짤 때 참고해요</span>
+            <span className="block text-[13px] text-ink-soft">대진 짤 때 참고해요</span>
           </span>
           <span className="shrink-0 rounded-lg bg-court-600 px-3 py-2 text-sm font-semibold text-white">늦참 표시</span>
         </button>

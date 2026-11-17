@@ -523,7 +523,8 @@ function TournamentQueue({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[15px] leading-snug text-ink">
-                    {t1.map(nameOf).join(', ')} <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> {t2.map(nameOf).join(', ')}
+                    <span className="whitespace-nowrap">{t1.map(nameOf).join(', ')}</span> <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
+                    <span className="whitespace-nowrap">{t2.map(nameOf).join(', ')}</span>
                   </p>
                   <p className={`text-xs ${reason ? 'text-shuttle-800' : 'text-court-600'}`}>{reason ?? '코트가 비면 바로 들어가요'}</p>
                 </div>

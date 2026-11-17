@@ -529,7 +529,7 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
       </div>
 
       <p className={`mb-2 min-h-5 text-[13px] ${sel ? 'font-semibold text-court-700' : 'text-ink-faint'}`}>
-        {sel ? `${selName} 선택됨. 바꿀 사람이나 자리를 누르세요` : '사람을 누르고 다른 사람이나 빈 자리를 누르면 자리가 바뀌어요'}
+        {sel ? `${selName} 선택됨. 바꿀 사람이나 자리를 누르세요` : '두 사람을 차례로 누르면 자리가 바뀌어요'}
       </p>
 
       {/* 이 매치의 경기들 */}
@@ -840,7 +840,13 @@ function ScheduleView({
                           </div>
                         ) : (
                           <p className={`text-[15px] leading-snug text-ink ${m.status === 'canceled' ? 'line-through' : ''}`}>
-                            <Joined parts={teamText(t1)} /> <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> <Joined parts={teamText(t2)} />
+                            <span className="whitespace-nowrap">
+                              <Joined parts={teamText(t1)} />
+                            </span>{' '}
+                            <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
+                            <span className="whitespace-nowrap">
+                              <Joined parts={teamText(t2)} />
+                            </span>
                           </p>
                         )}
                         {reason && <p className="mt-0.5 text-xs text-shuttle-800">{reason}</p>}

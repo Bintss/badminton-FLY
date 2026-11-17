@@ -131,10 +131,10 @@ export default function MePage() {
 function MenuRow({ to, label, sub, badge }: { to: string; label: string; sub?: string; badge?: React.ReactNode }) {
   return (
     <Link to={to} className="flex items-center justify-between gap-3 px-4 py-4 active:bg-floor">
-      <span className="font-medium text-ink">{label}</span>
-      <span className="flex items-center gap-2 text-sm text-ink-faint">
-        {badge ?? sub}
-        <IconChevronRight className="h-4 w-4" />
+      <span className="shrink-0 whitespace-nowrap font-medium text-ink">{label}</span>
+      <span className="flex min-w-0 items-center gap-2 text-sm text-ink-faint">
+        <span className="min-w-0 truncate">{badge ?? sub}</span>
+        <IconChevronRight className="h-4 w-4 shrink-0" />
       </span>
     </Link>
   )
