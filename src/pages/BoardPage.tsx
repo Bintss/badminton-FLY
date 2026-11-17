@@ -12,6 +12,7 @@ import { Badge, Button, Empty, List, Page, SectionTitle, Skeleton } from '../com
 import { DEFAULT_TZ, formatTime, trimSeconds } from '../lib/datetime'
 import { useServerNow } from '../lib/serverTime'
 import { errorMessage, supabase } from '../lib/supabase'
+import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
 import { blockReason, teamsOf, tournamentActive, type PlayerState, type ScheduledMatch } from '../lib/tournament'
 import type { SessionOverview } from '../lib/types'
 
@@ -99,8 +100,10 @@ export default function BoardPage() {
   const [canOperate, setCanOperate] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
+  const take = useLatest()
   const load = useCallback(async () => {
     if (!sessionId) return
+    const ticket = take()
     const [ov, st, ms, rs] = await Promise.all([
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase.from('session_player_stats').select('*').eq('session_id', sessionId),
@@ -114,6 +117,7 @@ export default function BoardPage() {
         .select('id, guest_name, profiles!registrations_user_id_fkey(display_name)')
         .eq('session_id', sessionId),
     ])
+    if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     const err = ov.error ?? st.error ?? ms.error ?? rs.error
     if (err) toast.error(errorMessage(err))
     setS((ov.data as SessionOverview | null) ?? null)
@@ -125,11 +129,12 @@ export default function BoardPage() {
     }
     setNames(map)
     setLoaded(true)
-  }, [sessionId, toast])
+  }, [sessionId, toast, take])
 
   useEffect(() => {
     void load()
   }, [load])
+  useRefetchOnResume(load)
 
   useEffect(() => {
     if (!sessionId) return
@@ -161,7 +166,9 @@ export default function BoardPage() {
       .channel(`board:${sessionId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `session_id=eq.${sessionId}` }, schedule)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations', filter: `session_id=eq.${sessionId}` }, schedule)
-      .subscribe()
+      // 대회 확정·확정 취소·종료처럼 세션만 바뀌는 경우에도 대진판 모드가 바로 바뀌게
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` }, schedule)
+      .subscribe(resubscribeReload(load))
     return () => {
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
       reloadTimer.current = null

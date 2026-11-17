@@ -14,6 +14,7 @@ import { KIND_LABEL, autoDraft, draftNotes, gameKind, levelScore, type Gender, t
 import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { LevelPicker } from '../components/LevelPicker'
 import { errorMessage, supabase } from '../lib/supabase'
+import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
 import {
   SCHEDULED_COLUMNS,
   STATE_LABEL,
@@ -78,8 +79,10 @@ export default function TournamentPage() {
   const [members, setMembers] = useState<{ user_id: string; name: string }[]>([])
   const [loaded, setLoaded] = useState(false)
 
+  const take = useLatest()
   const load = useCallback(async () => {
     if (!sessionId) return
+    const ticket = take()
     const [ov, rs, ms] = await Promise.all([
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
@@ -96,17 +99,19 @@ export default function TournamentPage() {
         .order('round_no')
         .order('order_no'),
     ])
+    if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     const err = ov.error ?? rs.error ?? ms.error
     if (err) toast.error(errorMessage(err))
     setS((ov.data as SessionOverview | null) ?? null)
     setRegs((rs.data as unknown as Reg[] | null) ?? [])
     setMatches((ms.data as unknown as MatchWithPhase[] | null) ?? [])
     setLoaded(true)
-  }, [sessionId, toast])
+  }, [sessionId, toast, take])
 
   useEffect(() => {
     void load()
   }, [load])
+  useRefetchOnResume(load)
 
   const loadMembers = useCallback(async () => {
     const { data } = await supabase
@@ -145,7 +150,7 @@ export default function TournamentPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `session_id=eq.${sessionId}` }, schedule)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations', filter: `session_id=eq.${sessionId}` }, schedule)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` }, schedule)
-      .subscribe()
+      .subscribe(resubscribeReload(load))
     return () => {
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
       reloadTimer.current = null
@@ -656,6 +661,8 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
         toast.error(errorMessage(error))
         return
       }
+      // 새 대진을 불러온 뒤에 '저장 안 한 변경 없음'으로 바꾼다 (먼저 바꾸면 잠깐 옛 대진이 보임)
+      await onChanged()
       setDirty(false)
     }
     if (andPublish) {

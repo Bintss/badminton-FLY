@@ -110,3 +110,10 @@ select pg_temp.fails(format($$select roster_add_guest('%s', '게스트', null, n
 reset role;
 select pg_temp.ok((select count(*) from activity_log where session_id = :'S' and action like 'roster.%') = 5, '명단 변경 이력 5건 (추가 2, 게스트 1, 빼기 2)');
 select pg_temp.ok((select (payload ->> 'capacity_raised')::boolean from activity_log where session_id = :'S' and action = 'roster.add' order by id limit 1), '정원을 늘린 것도 기록');
+
+-- ── 실시간 보강 (20261118000000): 선수 교체 시 경기 행이 갱신되는지 ──
+reset role;
+create temp table _seen (id uuid, xmin_before xid);
+insert into _seen select id, xmin from matches where session_id = :'S' and round_no = 2;
+update match_players set registration_id = registration_id where match_id = (select id from _seen);
+select pg_temp.ok((select m.xmin <> s.xmin_before from matches m join _seen s on s.id = m.id), '선수가 바뀌면 경기 행도 갱신 (실시간 구독으로 전달)');

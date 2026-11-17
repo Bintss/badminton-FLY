@@ -10,6 +10,7 @@ import { DEFAULT_TZ, formatDateTime, formatTime, toDateInput, toTimeInput, trimS
 import { useCountdownNow } from '../lib/serverTime'
 import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStatus'
 import { errorMessage, supabase } from '../lib/supabase'
+import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
 import { STATE_LABEL, tournamentActive } from '../lib/tournament'
 import type { RegistrationRow, SessionOverview } from '../lib/types'
 
@@ -38,8 +39,10 @@ export default function SessionPage() {
   const [hostName, setHostName] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
 
+  const take = useLatest()
   const load = useCallback(async () => {
     if (!sessionId) return
+    const ticket = take()
     const [ov, rs] = await Promise.all([
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
@@ -49,15 +52,17 @@ export default function SessionPage() {
         .neq('status', 'canceled')
         .order('seq'),
     ])
+    if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     if (ov.error || rs.error) toast.error(errorMessage(ov.error ?? rs.error))
     setS((ov.data as SessionOverview | null) ?? null)
     setRegs((rs.data as unknown as RegistrationRow[] | null) ?? [])
     setLoaded(true)
-  }, [sessionId, toast])
+  }, [sessionId, toast, take])
 
   useEffect(() => {
     void load()
   }, [load])
+  useRefetchOnResume(load)
 
   useEffect(() => {
     supabase
@@ -98,7 +103,7 @@ export default function SessionPage() {
       .channel(`session:${sessionId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations', filter: `session_id=eq.${sessionId}` }, schedule)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` }, schedule)
-      .subscribe()
+      .subscribe(resubscribeReload(load))
     return () => {
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
       reloadTimer.current = null
