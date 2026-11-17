@@ -1,5 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthProvider'
+import { ToastProvider } from './components/toast'
+import BoardEntryPage from './pages/BoardEntryPage'
 import ClubLayout from './club/ClubLayout'
 import { Page, Spinner } from './components/ui'
 import { getLastClubId } from './lib/lastClub'
@@ -29,6 +31,7 @@ function RootRedirect() {
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       {/* GitHub Pages 하위 경로(/repo/) 대응 */}
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
         <Routes>
@@ -39,6 +42,7 @@ export default function App() {
             <Route path="/c/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubHomePage />} />
               <Route path="me" element={<MePage />} />
+              <Route path="board" element={<BoardEntryPage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="s/:sessionId" element={<SessionPage />} />
               <Route path="s/:sessionId/board" element={<BoardPage />} />
@@ -49,6 +53,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   )
 }

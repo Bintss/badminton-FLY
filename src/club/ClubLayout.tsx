@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { Link, Navigate, Outlet, useParams } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
+import { IconCalendar, IconCourt, IconPerson } from '../components/icons'
 import { useAuth } from '../auth/AuthProvider'
 import { Page, Spinner } from '../components/ui'
 import { setLastClubId } from '../lib/lastClub'
@@ -26,6 +27,8 @@ export function useClub() {
 export default function ClubLayout() {
   const { clubId } = useParams()
   const { session } = useAuth()
+  const { pathname } = useLocation()
+  const wide = pathname.endsWith('/board') && pathname.includes('/s/') // 대진판은 가로 화면에서 넓게
   const [state, setState] = useState<{ club: Club | null; me: ClubMember | null; loaded: boolean }>({
     club: null,
     me: null,
@@ -62,17 +65,50 @@ export default function ClubLayout() {
 
   return (
     <ClubContext.Provider value={value}>
-      <div className="sticky top-0 z-10 border-b border-neutral-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-12 max-w-md items-center justify-between px-4">
-          <Link to={`/c/${state.club.id}`} className="truncate font-bold text-neutral-900">
+      <header className="sticky top-0 z-10 border-b border-black/[0.06] bg-floor/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className={`mx-auto flex h-12 items-center px-4 ${wide ? 'max-w-4xl' : 'max-w-md'}`}>
+          <Link to={`/c/${state.club.id}`} className="truncate text-[15px] font-bold text-court-700">
             {state.club.name}
           </Link>
-          <Link to="/clubs" className="text-sm text-neutral-500">
-            동아리 전환
-          </Link>
         </div>
-      </div>
+      </header>
       <Outlet />
+      <TabBar clubId={state.club.id} />
     </ClubContext.Provider>
+  )
+}
+
+/** 하단 탭: 일정 / 대진판 / 내 정보 */
+function TabBar({ clubId }: { clubId: string }) {
+  const { pathname } = useLocation()
+  const base = `/c/${clubId}`
+  const rest = pathname.slice(pathname.indexOf(base) + base.length)
+  const active = rest.startsWith('/board') || rest.endsWith('/board') ? 'board' : rest.startsWith('/me') || rest.startsWith('/admin') ? 'me' : 'home'
+
+  const tabs = [
+    { key: 'home', to: base, label: '일정', Icon: IconCalendar },
+    { key: 'board', to: `${base}/board`, label: '대진판', Icon: IconCourt },
+    { key: 'me', to: `${base}/me`, label: '내 정보', Icon: IconPerson },
+  ] as const
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-black/[0.08] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur" aria-label="주 메뉴">
+      <div className="mx-auto grid h-16 max-w-md grid-cols-3">
+        {tabs.map(({ key, to, label, Icon }) => {
+          const on = active === key
+          return (
+            <Link
+              key={key}
+              to={to}
+              aria-current={on ? 'page' : undefined}
+              className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold ${on ? 'text-court-600' : 'text-ink-faint'}`}
+            >
+              <Icon className="h-6 w-6" />
+              {label}
+            </Link>
+          )
+        })}
+      </div>
+    </nav>
   )
 }

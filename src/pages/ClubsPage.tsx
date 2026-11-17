@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
-import { Badge, Button, Card, ErrorText, Page, Spinner } from '../components/ui'
+import { Input } from '../components/form'
+import { IconChevronRight } from '../components/icons'
+import { useToast } from '../components/toast'
+import { Badge, Button, Card, Empty, List, ListSkeleton, Page, SectionTitle } from '../components/ui'
 import { errorMessage, supabase } from '../lib/supabase'
 import type { Club, MembershipWithClub } from '../lib/types'
 
 export default function ClubsPage() {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
+  const toast = useToast()
   const [memberships, setMemberships] = useState<MembershipWithClub[] | null>(null)
   const [clubs, setClubs] = useState<Club[]>([])
-  const [error, setError] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
 
@@ -23,12 +26,12 @@ export default function ClubsPage() {
       supabase.from('clubs').select('id, name, created_at').order('name'),
     ])
     if (mine.error || all.error) {
-      setError(errorMessage(mine.error ?? all.error))
+      toast.error(errorMessage(mine.error ?? all.error))
       return
     }
     setMemberships(mine.data as MembershipWithClub[])
     setClubs(all.data as Club[])
-  }, [uid])
+  }, [uid, toast])
 
   useEffect(() => {
     void load()
@@ -36,9 +39,9 @@ export default function ClubsPage() {
 
   const requestJoin = async (clubId: string) => {
     setBusyId(clubId)
-    setError('')
     const { error } = await supabase.rpc('request_join', { p_club: clubId })
-    if (error) setError(errorMessage(error))
+    if (error) toast.error(errorMessage(error))
+    else toast.success('가입을 신청했어요. 운영진이 승인하면 들어갈 수 있어요.')
     await load()
     setBusyId(null)
   }
@@ -47,98 +50,91 @@ export default function ClubsPage() {
     e.preventDefault()
     if (!newName.trim()) return
     setBusyId('new')
-    setError('')
     const { data, error } = await supabase.rpc('create_club', { p_name: newName.trim() })
     setBusyId(null)
     if (error) {
-      setError(errorMessage(error))
+      toast.error(errorMessage(error))
       return
     }
+    toast.success('동아리를 만들었어요')
     navigate(`/c/${data as string}`)
   }
 
-  if (!memberships) return <Page title="동아리"><Spinner /><ErrorText>{error}</ErrorText></Page>
+  const signOutButton = (
+    <button className="text-sm font-medium text-ink-soft" onClick={() => void signOut()}>
+      로그아웃
+    </button>
+  )
 
-  const joinedIds = new Set(memberships.filter((m) => m.status === 'approved' || m.status === 'pending').map((m) => m.club_id))
-  const others = clubs.filter((c) => !joinedIds.has(c.id))
+  if (!memberships) return <Page title="동아리" action={signOutButton}><ListSkeleton rows={2} /></Page>
+
   const visibleMine = memberships.filter((m) => m.status !== 'left')
+  const mineIds = new Set(visibleMine.map((m) => m.club_id))
+  const others = clubs.filter((c) => !mineIds.has(c.id))
 
   return (
-    <Page
-      title="동아리"
-      action={
-        <button className="text-sm text-neutral-500" onClick={() => void signOut()}>
-          로그아웃
-        </button>
-      }
-    >
-      <ErrorText>{error}</ErrorText>
-
-      <h2 className="mb-2 mt-2 text-sm font-semibold text-neutral-500">내 동아리</h2>
-      {visibleMine.length === 0 && <p className="mb-4 text-sm text-neutral-500">아직 가입한 동아리가 없어요.</p>}
-      <div className="space-y-2">
-        {visibleMine.map((m) => (
-          <Card key={m.club_id} className="flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-neutral-900">{m.clubs?.name ?? '동아리'}</p>
-              <div className="mt-1">
-                {m.status === 'approved' && <Badge tone="blue">{m.role === 'admin' ? '운영진' : '회원'}</Badge>}
-                {m.status === 'pending' && <Badge tone="amber">승인 대기 중</Badge>}
-                {m.status === 'rejected' && <Badge>거절됨</Badge>}
-              </div>
-            </div>
-            {m.status === 'approved' && (
-              <Link to={`/c/${m.club_id}`} className="rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white">
-                들어가기
+    <Page title="동아리" action={signOutButton}>
+      {visibleMine.length === 0 ? (
+        <Empty title="아직 가입한 동아리가 없어요">아래 목록에서 가입을 신청하거나 새 동아리를 만들어 보세요.</Empty>
+      ) : (
+        <List>
+          {visibleMine.map((m) =>
+            m.status === 'approved' ? (
+              <Link key={m.club_id} to={`/c/${m.club_id}`} className="flex items-center justify-between gap-3 px-4 py-4 active:bg-floor">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-ink">{m.clubs?.name ?? '동아리'}</p>
+                  <p className="text-sm text-ink-soft">{m.role === 'admin' ? '운영진' : '회원'}</p>
+                </div>
+                <IconChevronRight className="h-5 w-5 shrink-0 text-ink-faint" />
               </Link>
-            )}
-            {m.status === 'pending' && (
-              <Button variant="secondary" onClick={() => void load()}>
-                새로고침
-              </Button>
-            )}
-            {m.status === 'rejected' && (
-              <Button variant="secondary" disabled={busyId === m.club_id} onClick={() => void requestJoin(m.club_id)}>
-                다시 신청
-              </Button>
-            )}
-          </Card>
-        ))}
-      </div>
+            ) : (
+              <div key={m.club_id} className="flex items-center justify-between gap-3 px-4 py-4">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-ink">{m.clubs?.name ?? '동아리'}</p>
+                  <div className="mt-1">
+                    {m.status === 'pending' ? <Badge tone="shuttle">승인 기다리는 중</Badge> : <Badge>거절됨</Badge>}
+                  </div>
+                </div>
+                {m.status === 'pending' ? (
+                  <Button variant="ghost" className="h-10" onClick={() => void load()}>
+                    새로고침
+                  </Button>
+                ) : (
+                  <Button variant="secondary" className="h-10" disabled={busyId === m.club_id} onClick={() => void requestJoin(m.club_id)}>
+                    다시 신청
+                  </Button>
+                )}
+              </div>
+            ),
+          )}
+        </List>
+      )}
 
       {others.length > 0 && (
         <>
-          <h2 className="mb-2 mt-6 text-sm font-semibold text-neutral-500">가입 신청</h2>
-          <div className="space-y-2">
-            {others
-              .filter((c) => !memberships.some((m) => m.club_id === c.id && m.status === 'rejected'))
-              .map((c) => (
-                <Card key={c.id} className="flex items-center justify-between">
-                  <p className="font-semibold text-neutral-900">{c.name}</p>
-                  <Button variant="secondary" disabled={busyId === c.id} onClick={() => void requestJoin(c.id)}>
-                    가입 신청
-                  </Button>
-                </Card>
-              ))}
-          </div>
+          <SectionTitle>다른 동아리</SectionTitle>
+          <List>
+            {others.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <p className="truncate font-medium text-ink">{c.name}</p>
+                <Button variant="secondary" className="h-10" disabled={busyId === c.id} onClick={() => void requestJoin(c.id)}>
+                  가입 신청
+                </Button>
+              </div>
+            ))}
+          </List>
         </>
       )}
 
-      <h2 className="mb-2 mt-6 text-sm font-semibold text-neutral-500">동아리 만들기</h2>
+      <SectionTitle>새 동아리 만들기</SectionTitle>
       <Card>
         <form onSubmit={createClub} className="flex gap-2">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            maxLength={50}
-            placeholder="동아리 이름"
-            className="h-11 min-w-0 flex-1 rounded-xl border border-neutral-200 px-3 text-[15px] outline-none focus:border-neutral-900"
-          />
+          <Input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={50} placeholder="동아리 이름" className="mt-0 min-w-0 flex-1" />
           <Button type="submit" disabled={busyId === 'new' || !newName.trim()}>
             만들기
           </Button>
         </form>
-        <p className="mt-2 text-xs text-neutral-500">만든 사람이 첫 운영진이 돼요.</p>
+        <p className="mt-2 text-xs text-ink-faint">만든 사람이 첫 운영진이 돼요.</p>
       </Card>
     </Page>
   )

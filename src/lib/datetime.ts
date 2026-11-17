@@ -68,3 +68,10 @@ export function zonedToIso(date: string, time: string, tz = DEFAULT_TZ): string 
 export function trimSeconds(t: string): string {
   return t.slice(0, 5)
 }
+
+/** 날짜 블록 표시용: 월, 일, 요일 */
+export function dateParts(iso: string | number, tz = DEFAULT_TZ): { month: number; day: number; weekday: string; isToday: boolean } {
+  const p = parts(new Date(iso), tz)
+  const t = parts(new Date(), tz)
+  return { month: p.m, day: p.d, weekday: WEEKDAYS[p.wd], isToday: p.y === t.y && p.m === t.m && p.d === t.d }
+}

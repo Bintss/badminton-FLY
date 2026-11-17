@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
-import { Field, Input } from '../components/form'
+import { Field, Input, Segmented } from '../components/form'
+import { IconChevronLeft } from '../components/icons'
+import { useToast } from '../components/toast'
 import { Button, Card, ErrorText, Page } from '../components/ui'
 import { DEFAULT_TZ, toDateInput, zonedToIso } from '../lib/datetime'
 import { serverNow } from '../lib/serverTime'
@@ -11,6 +13,7 @@ export default function FlashNewPage() {
   const { club } = useClub()
   const tz = club.timezone ?? DEFAULT_TZ
   const navigate = useNavigate()
+  const toast = useToast()
 
   const [title, setTitle] = useState('번개')
   const [date, setDate] = useState(() => toDateInput(serverNow(), tz))
@@ -51,11 +54,20 @@ export default function FlashNewPage() {
       setError(errorMessage(error))
       return
     }
-    navigate(`/c/${club.id}`)
+    toast.success(openNow ? '번개를 열었어요. 지금부터 신청할 수 있어요' : '번개를 만들었어요. 예약한 시각에 투표가 열려요')
+    navigate(`/c/${club.id}/s/${data as string}`)
   }
 
   return (
-    <Page title="번개 만들기">
+    <Page
+      title="번개 만들기"
+      back={
+        <Link to={`/c/${club.id}`} className="-ml-1 inline-flex items-center gap-0.5 text-sm font-medium text-ink-soft">
+          <IconChevronLeft className="h-4 w-4" />
+          일정
+        </Link>
+      }
+    >
       <Card>
         <form onSubmit={submit} className="space-y-4">
           <Field label="제목">
@@ -84,26 +96,26 @@ export default function FlashNewPage() {
             </Field>
           </div>
 
-          <fieldset>
-            <legend className="text-sm font-medium text-neutral-700">투표 오픈</legend>
-            <div className="mt-2 flex gap-2">
-              <Button type="button" variant={openNow ? 'primary' : 'secondary'} className="flex-1" onClick={() => setOpenNow(true)}>
-                지금 바로
-              </Button>
-              <Button type="button" variant={openNow ? 'secondary' : 'primary'} className="flex-1" onClick={() => setOpenNow(false)}>
-                시각 예약
-              </Button>
-            </div>
+          <div>
+            <span className="text-[13px] font-semibold text-ink-soft">투표 오픈</span>
+            <Segmented
+              value={openNow ? 'now' : 'later'}
+              options={[
+                { value: 'now', label: '지금 바로' },
+                { value: 'later', label: '시각 예약' },
+              ]}
+              onChange={(v) => setOpenNow(v === 'now')}
+            />
             {!openNow && (
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <Input type="date" value={openDate} onChange={(e) => setOpenDate(e.target.value)} required />
-                <Input type="time" value={openTime} onChange={(e) => setOpenTime(e.target.value)} required />
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Input type="date" value={openDate} onChange={(e) => setOpenDate(e.target.value)} required aria-label="오픈 날짜" />
+                <Input type="time" value={openTime} onChange={(e) => setOpenTime(e.target.value)} required aria-label="오픈 시각" />
               </div>
             )}
-          </fieldset>
+          </div>
 
-          <Button type="submit" className="w-full" disabled={busy}>
-            번개 열기
+          <Button type="submit" className="h-14 w-full text-[16px]" disabled={busy}>
+            {openNow ? '번개 열기' : '번개 만들기'}
           </Button>
           <ErrorText>{error}</ErrorText>
         </form>

@@ -1,0 +1,17 @@
+{
+  "name": "FLY 배드민턴",
+  "short_name": "FLY",
+  "description": "배드민턴 동아리 운동 투표와 현장 대진",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f1f4f3",
+  "theme_color": "#13644f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

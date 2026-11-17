@@ -1,29 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
-import { Badge, Card, ErrorText, Page, Spinner } from '../components/ui'
-import { DEFAULT_TZ, formatDateTime, formatTime } from '../lib/datetime'
+import { IconPlus } from '../components/icons'
+import { useToast } from '../components/toast'
+import { Badge, Empty, ListSkeleton, Page } from '../components/ui'
+import { DEFAULT_TZ, dateParts, formatDateTime, formatTime } from '../lib/datetime'
 import { serverNow, useServerNow } from '../lib/serverTime'
 import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStatus'
 import { errorMessage, supabase } from '../lib/supabase'
 import type { SessionOverview } from '../lib/types'
 
-const PHASE_TONE: Record<SessionPhase, string> = {
-  canceled: 'bg-neutral-100 text-neutral-500',
-  before_open: 'bg-neutral-100 text-neutral-700',
-  open: 'bg-green-100 text-green-800',
-  full: 'bg-amber-100 text-amber-800',
-  in_progress: 'bg-blue-100 text-blue-800',
-  ended: 'bg-neutral-100 text-neutral-500',
+const PHASE_STYLE: Record<SessionPhase, string> = {
+  canceled: 'text-ink-faint',
+  before_open: 'text-ink-soft',
+  open: 'text-court-600',
+  full: 'text-shuttle-800',
+  in_progress: 'text-court-600',
+  ended: 'text-ink-faint',
 }
 
 export default function ClubHomePage() {
   const { club, isAdmin } = useClub()
   const tz = club.timezone ?? DEFAULT_TZ
+  const toast = useToast()
   const now = useServerNow()
   const [sessions, setSessions] = useState<SessionOverview[] | null>(null)
-  const [pendingCount, setPendingCount] = useState(0)
-  const [error, setError] = useState('')
 
   const load = useCallback(async () => {
     // 정기운동 회차가 아직 없으면 만들어 둔다 (멱등. cron이 늦어도 목록이 비지 않게)
@@ -35,104 +36,87 @@ export default function ClubHomePage() {
       .gt('ends_at', new Date(serverNow()).toISOString())
       .order('starts_at')
       .limit(30)
-    if (error) setError(errorMessage(error))
-    else setSessions(data as SessionOverview[])
-  }, [club.id])
+    if (error) {
+      toast.error(errorMessage(error))
+      setSessions([])
+    } else setSessions(data as SessionOverview[])
+  }, [club.id, toast])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  useEffect(() => {
-    if (!isAdmin) return
-    supabase
-      .from('club_members')
-      .select('user_id', { count: 'exact', head: true })
-      .eq('club_id', club.id)
-      .eq('status', 'pending')
-      .then(({ count }) => setPendingCount(count ?? 0))
-  }, [club.id, isAdmin])
-
   return (
     <Page
       title="일정"
       action={
-        <Link to="flash/new" className="rounded-xl bg-neutral-900 px-3 py-2 text-sm font-semibold text-white">
-          + 번개
+        <Link to="flash/new" className="inline-flex h-10 items-center gap-1 rounded-xl bg-court-600 pl-2.5 pr-3.5 text-[15px] font-semibold text-white active:bg-court-700">
+          <IconPlus className="h-4 w-4" />
+          번개
         </Link>
       }
     >
-      <ErrorText>{error}</ErrorText>
-      {!sessions && !error && <Spinner />}
+      {!sessions && <ListSkeleton rows={3} />}
       {sessions?.length === 0 && (
-        <Card>
-          <p className="text-sm text-neutral-500">예정된 운동이 없어요.</p>
-          {isAdmin && <p className="mt-1 text-xs text-neutral-400">아래 정기운동 관리에서 정기운동을 등록하면 투표 오픈 7일 전부터 여기에 나타나요.</p>}
-        </Card>
+        <Empty title="예정된 운동이 없어요">
+          {isAdmin ? '내 정보 탭의 정기운동 관리에서 정기운동을 등록하면, 투표 오픈 7일 전부터 여기에 보여요.' : '오른쪽 위 번개 버튼으로 운동을 열 수 있어요.'}
+        </Empty>
       )}
 
-      <div className="space-y-2">
+      <ul className="space-y-2.5">
         {sessions?.map((s) => {
           const phase = sessionPhase(s, now)
-          const dim = phase === 'canceled'
+          const d = dateParts(s.starts_at, tz)
+          const full = s.confirmed_count >= s.capacity
+          const ratio = Math.min(1, s.confirmed_count / s.capacity)
           return (
-            <Link key={s.id} to={`s/${s.id}`} className="block">
-            <Card className={`active:bg-neutral-50 ${dim ? 'opacity-50' : ''}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <Badge tone={s.type === 'regular' ? 'blue' : 'neutral'}>{s.type === 'regular' ? '정기' : '번개'}</Badge>
-                    <span className="truncate font-semibold text-neutral-900">{s.title}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-neutral-700">
-                    {formatDateTime(s.starts_at, tz)}~{formatTime(s.ends_at, tz)}
-                  </p>
-                  <p className="text-sm text-neutral-500">
-                    {s.place || '장소 미정'} · 코트 {s.court_count}면
-                  </p>
+            <li key={s.id}>
+              <Link
+                to={`s/${s.id}`}
+                className={`flex gap-3.5 rounded-2xl border border-black/[0.06] bg-white p-3.5 active:bg-floor ${phase === 'canceled' ? 'opacity-55' : ''}`}
+              >
+                {/* 날짜 블록 */}
+                <div className={`flex w-14 shrink-0 flex-col items-center justify-center rounded-xl py-2 ${d.isToday ? 'bg-court-600 text-white' : 'bg-floor text-ink'}`}>
+                  <span className={`text-[11px] font-semibold ${d.isToday ? 'text-white/80' : 'text-ink-soft'}`}>{d.isToday ? '오늘' : `${d.month}월`}</span>
+                  <span className="score text-[30px] font-semibold leading-none">{d.day}</span>
+                  <span className={`text-[11px] font-semibold ${d.isToday ? 'text-white/80' : 'text-ink-soft'}`}>{d.weekday}</span>
                 </div>
-                <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-semibold ${PHASE_TONE[phase]}`}>{PHASE_LABEL[phase]}</span>
-              </div>
 
-              <div className="mt-3 flex items-center justify-between text-sm">
-                <span className="text-neutral-700">
-                  확정 <b>{s.confirmed_count}</b>/{s.capacity}
-                  {s.waitlist_count > 0 && <span className="text-neutral-500"> · 대기 {s.waitlist_count}</span>}
-                </span>
-                {phase === 'before_open' && <span className="text-neutral-500">{formatDateTime(s.opens_at, tz)} 오픈</span>}
-                {s.my_status === 'confirmed' && <Badge tone="blue">참석 확정</Badge>}
-                {s.my_status === 'waitlisted' && <Badge tone="amber">대기 중</Badge>}
-              </div>
-            </Card>
-            </Link>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
+                      <span className={`truncate text-[16px] font-bold text-ink ${phase === 'canceled' ? 'line-through' : ''}`}>{s.title}</span>
+                    </div>
+                    <span className={`shrink-0 text-[13px] font-bold ${PHASE_STYLE[phase]}`}>{PHASE_LABEL[phase]}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-sm text-ink-soft">
+                    {formatTime(s.starts_at, tz)}~{formatTime(s.ends_at, tz)}
+                    {s.place && `, ${s.place}`}
+                  </p>
+
+                  {/* 정원 막대 */}
+                  <div className="mt-2.5 flex items-center gap-2.5">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/[0.06]">
+                      <div className={`h-full rounded-full ${full ? 'bg-shuttle-400' : 'bg-court-500'}`} style={{ width: `${ratio * 100}%` }} />
+                    </div>
+                    <span className="score shrink-0 text-[15px] font-semibold text-ink">
+                      {s.confirmed_count}/{s.capacity}
+                      {s.waitlist_count > 0 && <span className="text-ink-soft"> +{s.waitlist_count}</span>}
+                    </span>
+                  </div>
+
+                  <div className="mt-1.5 flex min-h-5 items-center justify-between text-xs">
+                    <span className="text-ink-faint">{phase === 'before_open' ? `${formatDateTime(s.opens_at, tz)} 투표 오픈` : `코트 ${s.court_count}면`}</span>
+                    {s.my_status === 'confirmed' && <Badge tone="court">참석</Badge>}
+                    {s.my_status === 'waitlisted' && <Badge tone="shuttle">대기 중</Badge>}
+                  </div>
+                </div>
+              </Link>
+            </li>
           )
         })}
-      </div>
-
-      <nav className="mt-6 space-y-2">
-        <Link to="me" className="block">
-          <Card className="flex items-center justify-between">
-            <span className="font-medium text-neutral-900">내 정보</span>
-            <span className="text-sm text-neutral-400">이름·급수</span>
-          </Card>
-        </Link>
-        {isAdmin && (
-          <>
-            <Link to="admin/templates" className="block">
-              <Card className="flex items-center justify-between">
-                <span className="font-medium text-neutral-900">정기운동 관리</span>
-                <span className="text-sm text-neutral-400">요일·시간·투표 오픈</span>
-              </Card>
-            </Link>
-            <Link to="admin/members" className="block">
-              <Card className="flex items-center justify-between">
-                <span className="font-medium text-neutral-900">회원 관리</span>
-                {pendingCount > 0 ? <Badge tone="amber">가입 신청 {pendingCount}</Badge> : <span className="text-sm text-neutral-400">가입 승인·운영진</span>}
-              </Card>
-            </Link>
-          </>
-        )}
-      </nav>
+      </ul>
     </Page>
   )
 }

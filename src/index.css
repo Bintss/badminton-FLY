@@ -1,9 +1,75 @@
 @import "tailwindcss";
 
+/*
+ * 디자인 토큰
+ *   court  : 실내 코트 바닥 초록 (대표색)
+ *   line   : 코트 라인 흰색
+ *   shuttle: 셔틀콕 노랑 (오래 쉰 사람 강조에만)
+ *   floor  : 체육관 바닥처럼 차가운 회색 배경
+ *   ink    : 본문
+ * 숫자(카운트다운·게임 수·날짜)는 전광판 느낌의 Barlow Condensed, 나머지는 Pretendard
+ */
+@theme {
+  --color-court-50: #eef6f3;
+  --color-court-100: #d5eae2;
+  --color-court-200: #a9d3c4;
+  --color-court-500: #1f8a6d;
+  --color-court-600: #13644f;
+  --color-court-700: #0c4436;
+  --color-shuttle-100: #fdf3cf;
+  --color-shuttle-400: #f2c230;
+  --color-shuttle-800: #6b5205;
+  --color-floor: #f1f4f3;
+  --color-ink: #1a2421;
+  --color-ink-soft: #55615d;
+  --color-ink-faint: #8d9894;
+  --color-danger: #d93b3b;
+
+  --font-sans: "Pretendard Variable", Pretendard, system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-score: "Barlow Condensed", "Pretendard Variable", system-ui, sans-serif;
+}
+
 html {
   -webkit-tap-highlight-color: transparent;
+  background: var(--color-floor);
+  color: var(--color-ink);
 }
 
 body {
-  font-family: "Pretendard", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 숫자 전용: 폭이 고정된 숫자로 카운트다운이 흔들리지 않게 */
+.score {
+  font-family: var(--font-score);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-court-500);
+  outline-offset: 2px;
+}
+
+/* 토스트: 사용자 행동에 대한 응답이라 짧게 내려온다 */
+@keyframes toast-in {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-in { animation: toast-in 160ms ease-out; }
+
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e6eae8 0, #f3f5f4 50%, #e6eae8 100%);
+  background-size: 200px 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-in, .skeleton { animation: none; }
 }
