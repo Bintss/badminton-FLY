@@ -6,6 +6,7 @@ import { ConfirmButton } from '../components/ConfirmButton'
 import { Field, Input } from '../components/form'
 import { ScoreCapField } from '../components/ScoreCapField'
 import { IconChevronLeft, IconPlus, IconX } from '../components/icons'
+import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
 import { Sheet } from '../components/Sheet'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
@@ -24,6 +25,7 @@ import {
   teamsOf,
   toSchedulePayload,
   tournamentActive,
+  winnerOf,
   type DraftMatch,
   type PlayerState,
   type ScheduledMatch,
@@ -707,6 +709,27 @@ function ScheduleView({
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [sub, setSub] = useState<{ match: ScheduledMatch; out: string } | null>(null)
+  const [scoring, setScoring] = useState<ScheduledMatch | null>(null)
+  const [forfeit, setForfeit] = useState<ScheduledMatch | null>(null)
+
+  /** 점수 넣을 수 있나: 운영진, 또는 그 경기 선수(대회 중이거나 아직 점수가 없을 때) — 서버 can_score_match와 같은 규칙 */
+  const canScore = (m: ScheduledMatch) =>
+    isAdmin || (!!myRegId && m.match_players.some((p) => p.registration_id === myRegId) && (tournamentActive(s) || !m.result_at))
+
+  const saveScore = async (m: ScheduledMatch, kind: ScoreKind, a: number | null, b: number | null): Promise<string | null> => {
+    const { error } = await supabase.rpc('record_score', { p_match: m.id, p_score1: a, p_score2: b, p_kind: kind, p_expected: m.result_at })
+    await onChanged()
+    if (error) {
+      if (error.message.includes('score_conflict')) {
+        setScoring(null)
+        toast.error('다른 사람이 먼저 점수를 넣었어요. 바뀐 점수를 확인하고 다시 고쳐주세요')
+        return null
+      }
+      return errorMessage(error)
+    }
+    toast.success(kind === 'normal' ? `${a} : ${b} 저장했어요` : kind === 'clear' ? '점수를 지웠어요' : '기권승으로 저장했어요')
+    return null
+  }
 
   const scheduled = matches.filter((m) => m.phase === 'scheduled')
   const active = tournamentActive(s)
@@ -733,6 +756,10 @@ function ScheduleView({
   const mine = myRegId ? scheduled.filter((m) => m.status !== 'canceled' && m.match_players.some((p) => p.registration_id === myRegId)) : []
   const myNext = mine.find((m) => m.status === 'playing') ?? mine.find((m) => m.status === 'queued')
   const myDone = mine.filter((m) => m.status === 'finished').length
+  const myTeamOf = (m: ScheduledMatch) => m.match_players.find((p) => p.registration_id === myRegId)?.team ?? null
+  const myWins = mine.filter((m) => winnerOf(m) !== null && winnerOf(m) === myTeamOf(m)).length
+  const myLosses = mine.filter((m) => winnerOf(m) !== null && winnerOf(m) !== myTeamOf(m)).length
+  const missing = scheduled.filter((m) => m.status === 'finished' && !m.result_kind)
   const doneCount = scheduled.filter((m) => m.status === 'finished').length
   const liveCount = scheduled.filter((m) => m.status !== 'canceled').length
 
@@ -757,6 +784,11 @@ function ScheduleView({
             <h2 className="text-[15px] font-bold text-ink">내 대회 경기</h2>
             <span className="text-sm text-ink-soft">
               {mine.length}경기 중 <span className="score text-[17px] text-ink">{myDone}</span>경기 끝
+              {myWins + myLosses > 0 && (
+                <>
+                  , <span className="font-semibold text-court-700">{myWins}승</span> {myLosses}패
+                </>
+              )}
             </span>
           </div>
           {mine.length === 0 ? (
@@ -798,7 +830,7 @@ function ScheduleView({
         <p className="mb-4 rounded-xl bg-court-50 px-3 py-2.5 text-sm text-court-700">대회가 끝났어요. 대진판에서 다시 자유롭게 경기를 만들 수 있어요.</p>
       )}
 
-      <SectionTitle right={`${liveCount}경기 중 ${doneCount}경기 끝`}>대진표</SectionTitle>
+      <SectionTitle right={`${liveCount}경기 중 ${doneCount}경기 끝${missing.length ? `, 점수 미입력 ${missing.length}` : ''}`}>대진표</SectionTitle>
       <div className="space-y-5">
         {rounds.map((r) => (
           <section key={r}>
@@ -814,8 +846,18 @@ function ScheduleView({
                   const isMine = !!myRegId && m.match_players.some((p) => p.registration_id === myRegId)
                   const reason = active && m.status === 'queued' ? blockReason(m, info) : null
                   const editable = isAdmin && active && m.status === 'queued'
+                  const finished = m.status === 'finished'
+                  const win = winnerOf(m)
+                  const tappable = finished && canScore(m)
                   return (
-                    <div key={m.id} className={`flex items-center gap-2 px-3 py-2.5 ${isMine ? 'bg-court-50' : ''} ${m.status === 'canceled' ? 'opacity-50' : ''}`}>
+                    <div
+                      key={m.id}
+                      role={tappable ? 'button' : undefined}
+                      tabIndex={tappable ? 0 : undefined}
+                      onClick={tappable ? () => setScoring(m) : undefined}
+                      onKeyDown={tappable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setScoring(m)) : undefined}
+                      className={`flex items-center gap-2 px-3 py-2.5 ${isMine ? 'bg-court-50' : ''} ${m.status === 'canceled' ? 'opacity-50' : ''} ${tappable ? 'cursor-pointer active:bg-floor' : ''}`}
+                    >
                       <span className="score w-6 shrink-0 text-center text-[19px] font-semibold text-court-600">{m.order_no}</span>
                       <div className="min-w-0 flex-1">
                         {editable ? (
@@ -840,11 +882,11 @@ function ScheduleView({
                           </div>
                         ) : (
                           <p className={`text-[15px] leading-snug text-ink ${m.status === 'canceled' ? 'line-through' : ''}`}>
-                            <span className="whitespace-nowrap">
+                            <span className={`whitespace-nowrap ${win === 2 ? 'opacity-55' : win === 1 ? 'font-semibold' : ''}`}>
                               <Joined parts={teamText(t1)} />
                             </span>{' '}
                             <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
-                            <span className="whitespace-nowrap">
+                            <span className={`whitespace-nowrap ${win === 1 ? 'opacity-55' : win === 2 ? 'font-semibold' : ''}`}>
                               <Joined parts={teamText(t2)} />
                             </span>
                           </p>
@@ -855,7 +897,16 @@ function ScheduleView({
                         const k = gameKind([...t1, ...t2].map(roster.genderOf))
                         return k && k !== 'invalid' ? <KindBadge kind={k} /> : null
                       })()}
-                      <StatusBadge m={m} />
+                      {finished ? <ResultBadge m={m} canEnter={tappable} /> : <StatusBadge m={m} />}
+                      {editable && (
+                        <button
+                          type="button"
+                          onClick={() => setForfeit(m)}
+                          className="h-10 shrink-0 rounded-lg bg-black/[0.05] px-2 text-xs font-semibold text-ink-soft active:bg-black/10"
+                        >
+                          기권
+                        </button>
+                      )}
                       {editable && (
                         <ConfirmButton
                           label={<IconX />}
@@ -874,6 +925,45 @@ function ScheduleView({
           </section>
         ))}
       </div>
+
+      {scoring && (
+        <ScoreSheet
+          mode="edit"
+          title={`매치 ${scoring.round_no} · ${scoring.order_no}경기 ${scoring.result_kind ? '점수 고치기' : '점수 입력'}`}
+          team1={teamsOf(scoring.match_players)[0].map(roster.nameOf).join(', ')}
+          team2={teamsOf(scoring.match_players)[1].map(roster.nameOf).join(', ')}
+          target={s.score_target}
+          cap={s.score_cap}
+          initial={{ score1: scoring.score1, score2: scoring.score2 }}
+          canScore={canScore(scoring)}
+          canClear={!!scoring.result_kind}
+          onSubmit={(kind, a, b) => saveScore(scoring, kind, a, b)}
+          onClose={() => setScoring(null)}
+        />
+      )}
+
+      {forfeit && (
+        <Sheet title={`매치 ${forfeit.round_no} · ${forfeit.order_no}경기 기권 처리`} onClose={() => setForfeit(null)}>
+          <div className="space-y-2 p-4">
+            <p className="text-sm leading-relaxed text-ink-soft">끝내 안 온 팀이 있을 때 써요. 경기는 치지 않은 채 끝나고, 게임 수에는 들어가지 않아요.</p>
+            {([1, 2] as const).map((team) => (
+              <Button
+                key={team}
+                variant="secondary"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  const m = forfeit
+                  setForfeit(null)
+                  void run(() => supabase.rpc('forfeit_match', { p_match: m.id, p_winner: team }), '기권 처리했어요')
+                }}
+              >
+                {teamsOf(forfeit.match_players)[team - 1].map(roster.nameOf).join(', ')} 기권승
+              </Button>
+            ))}
+          </div>
+        </Sheet>
+      )}
 
       {sub && (
         <Sheet title={`${roster.nameOf(sub.out)} 대신 들어갈 사람`} onClose={() => setSub(null)}>
@@ -927,6 +1017,26 @@ function Joined({ parts }: { parts: ReactNode[] }) {
 function KindBadge({ kind }: { kind: GameKind }) {
   const tone = kind === 'MD' ? 'bg-sky-50 text-sky-700' : kind === 'WD' ? 'bg-rose-50 text-rose-600' : 'bg-violet-50 text-violet-700'
   return <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold ${tone}`}>{KIND_LABEL[kind]}</span>
+}
+
+function ResultBadge({ m, canEnter }: { m: ScheduledMatch; canEnter: boolean }) {
+  if (m.result_kind === 'normal' && m.score1 !== null && m.score2 !== null) {
+    return (
+      <span className="score shrink-0 rounded-md bg-ink/[0.06] px-2 py-0.5 text-[16px] font-semibold text-ink">
+        <span className={m.score1 > m.score2 ? 'text-court-700' : 'text-ink-faint'}>{m.score1}</span>
+        <span className="px-0.5 text-ink-faint">:</span>
+        <span className={m.score2 > m.score1 ? 'text-court-700' : 'text-ink-faint'}>{m.score2}</span>
+      </span>
+    )
+  }
+  if (m.result_kind === 'walkover1' || m.result_kind === 'walkover2') {
+    return <span className="shrink-0 rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-xs font-semibold text-ink-soft">{m.result_kind === 'walkover1' ? '1팀' : '2팀'} 기권승</span>
+  }
+  return (
+    <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold ${canEnter ? 'bg-shuttle-100 text-shuttle-800' : 'bg-ink/[0.06] text-ink-faint'}`}>
+      {canEnter ? '점수 넣기' : '점수 미입력'}
+    </span>
+  )
 }
 
 function StatusBadge({ m }: { m: ScheduledMatch }) {

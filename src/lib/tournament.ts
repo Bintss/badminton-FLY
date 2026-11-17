@@ -9,10 +9,17 @@ export interface ScheduledMatch {
   court_no: number | null
   started_at: string | null
   finished_at: string | null
+  score1: number | null
+  score2: number | null
+  /** normal: 점수, walkover1/2: 팀 1/2 기권승 */
+  result_kind: 'normal' | 'walkover1' | 'walkover2' | null
+  /** 마지막 입력 시각. 수정할 때 같이 보내 충돌을 막는다 */
+  result_at: string | null
   match_players: { registration_id: string; team: 1 | 2 | null }[]
 }
 
-export const SCHEDULED_COLUMNS = 'id, round_no, order_no, status, court_no, started_at, finished_at, match_players(registration_id, team)'
+export const SCHEDULED_COLUMNS =
+  'id, round_no, order_no, status, court_no, started_at, finished_at, score1, score2, result_kind, result_at, match_players(registration_id, team)'
 
 export const STATE_LABEL: Record<TournamentState, string> = {
   draft: '대진 준비 중',
@@ -152,4 +159,29 @@ export function toSchedulePayload(complete: DraftMatch[]) {
     nextOrder[d.round] = (nextOrder[d.round] ?? 0) + 1
     return { round: d.round, order: nextOrder[d.round], team1: d.team1, team2: d.team2 }
   })
+}
+
+/**
+ * 점수 규칙 (서버 score_problem과 같은 규칙). 맞으면 null, 아니면 안내 문구
+ *   이긴 팀 ≥ 목표, 목표에서 끝나면 2점 차 이상, 듀스 뒤엔 정확히 2점 차, 최대 점수에선 1점 차도 인정
+ */
+export function scoreProblem(target: number, cap: number | null, s1: number | null, s2: number | null): string | null {
+  if (s1 === null || s2 === null || Number.isNaN(s1) || Number.isNaN(s2) || s1 < 0 || s2 < 0) return '두 팀 점수를 모두 넣어주세요'
+  if (s1 === s2) return '동점으로는 끝날 수 없어요'
+  const w = Math.max(s1, s2)
+  const l = Math.min(s1, s2)
+  if (w < target) return `이긴 팀이 ${target}점 이상이어야 해요`
+  if (cap !== null && w > cap) return `최대 ${cap}점까지예요`
+  if (w === target) return l > target - 2 ? `${target - 1}:${target - 1} 이후엔 2점을 앞서야 끝나요` : null
+  if (w - l === 2) return null
+  if (cap !== null && w === cap && w - l === 1) return null
+  return cap !== null && w === cap ? `${cap}점에선 1~2점 차로 끝나요` : '듀스 뒤엔 2점을 앞서야 끝나요'
+}
+
+/** 이긴 팀 (점수 또는 기권승). 결과 없으면 null */
+export function winnerOf(m: Pick<ScheduledMatch, 'score1' | 'score2' | 'result_kind'>): 1 | 2 | null {
+  if (m.result_kind === 'walkover1') return 1
+  if (m.result_kind === 'walkover2') return 2
+  if (m.result_kind === 'normal' && m.score1 !== null && m.score2 !== null) return m.score1 > m.score2 ? 1 : 2
+  return null
 }

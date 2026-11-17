@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { ConfirmButton } from '../components/ConfirmButton'
+import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
 import { GenderToggle } from '../components/GenderToggle'
 import { Input } from '../components/form'
 import { IconChevronLeft, IconDown, IconSun, IconUndo, IconUp, IconX } from '../components/icons'
@@ -83,6 +85,8 @@ function useWakeLock(enabled: boolean) {
 export default function BoardPage() {
   const { sessionId } = useParams()
   const { club, isAdmin } = useClub()
+  const { session: auth } = useAuth()
+  const uid = auth?.user.id
   const toast = useToast()
   const tz = club.timezone ?? DEFAULT_TZ
   const now = useServerNow(15_000)
@@ -250,7 +254,16 @@ export default function BoardPage() {
       {/* 가로 화면(태블릿·가로 모드)에서는 왼쪽 코트·대기, 오른쪽 참석자 */}
       <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:gap-6">
         <div>
-          <Courts s={s} playing={playing} now={now} nameOf={nameOf} canOperate={operating} isAdmin={isAdmin} onChanged={load} />
+          <Courts
+            s={s}
+            playing={playing}
+            now={now}
+            nameOf={nameOf}
+            canOperate={operating}
+            isAdmin={isAdmin}
+            myRegIds={new Set(players.filter((p) => p.user_id && p.user_id === uid).map((p) => p.registration_id))}
+            onChanged={load}
+          />
           {tMode ? (
             <TournamentQueue
               queued={tQueued}
@@ -303,6 +316,7 @@ function Courts({
   nameOf,
   canOperate,
   isAdmin,
+  myRegIds,
   onChanged,
 }: {
   s: SessionOverview
@@ -311,10 +325,26 @@ function Courts({
   nameOf: (id: string) => string
   canOperate: boolean
   isAdmin: boolean
+  /** 내 신청 id (대회 경기 점수 입력 권한 판단) */
+  myRegIds: Set<string>
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
+  const [scoring, setScoring] = useState<MatchRow | null>(null)
+
+  /** 대회 경기 종료 + 점수. 실패하면 창에 보여줄 문구 */
+  const finishScheduled = async (m: MatchRow, kind: ScoreKind, a: number | null, b: number | null): Promise<string | null> => {
+    const { data, error } = await supabase.rpc('finish_with_score', { p_match: m.id, p_score1: a, p_score2: b, p_kind: kind })
+    if (error) {
+      await onChanged()
+      return errorMessage(error)
+    }
+    const result = kind === 'normal' ? ` ${a}:${b} 기록` : kind ? ' 기권승 기록' : ', 점수는 나중에 입력'
+    toast.success(`코트 ${m.court_no} 종료${result}${data ? '. 다음 경기가 들어갔어요' : ''}`)
+    await onChanged()
+    return null
+  }
   const courts = Array.from({ length: s.court_count }, (_, i) => i + 1)
 
   const act = async (m: MatchRow, rpc: 'finish_match' | 'cancel_match') => {
@@ -379,19 +409,38 @@ function Courts({
                     onConfirm={() => void act(m, 'cancel_match')}
                   />
                 )}
-                <ConfirmButton
-                  label="경기 종료"
-                  confirmLabel="한 번 더 누르면 종료"
-                  className="h-11 flex-1 bg-ink text-[15px] text-white"
-                  armedClassName="h-11 flex-1 bg-court-700 text-[15px] text-white"
-                  disabled={busy === m.id}
-                  onConfirm={() => void act(m, 'finish_match')}
-                />
+                {m.phase === 'scheduled' ? (
+                  <Button className="h-11 flex-1 bg-ink text-[15px] text-white" disabled={busy === m.id} onClick={() => setScoring(m)}>
+                    경기 종료 · 점수
+                  </Button>
+                ) : (
+                  <ConfirmButton
+                    label="경기 종료"
+                    confirmLabel="한 번 더 누르면 종료"
+                    className="h-11 flex-1 bg-ink text-[15px] text-white"
+                    armedClassName="h-11 flex-1 bg-court-700 text-[15px] text-white"
+                    disabled={busy === m.id}
+                    onConfirm={() => void act(m, 'finish_match')}
+                  />
+                )}
               </div>
             )}
           </div>
         )
       })}
+      {scoring && (
+        <ScoreSheet
+          mode="finish"
+          title={`코트 ${scoring.court_no} · 매치 ${scoring.round_no} · ${scoring.order_no}경기`}
+          team1={teamsOf(scoring.match_players)[0].map(nameOf).join(', ')}
+          team2={teamsOf(scoring.match_players)[1].map(nameOf).join(', ')}
+          target={s.score_target}
+          cap={s.score_cap}
+          canScore={isAdmin || scoring.match_players.some((p) => myRegIds.has(p.registration_id))}
+          onSubmit={(kind, a, b) => finishScheduled(scoring, kind, a, b)}
+          onClose={() => setScoring(null)}
+        />
+      )}
     </section>
   )
 }

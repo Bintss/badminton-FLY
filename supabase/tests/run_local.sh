@@ -15,7 +15,8 @@ psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f supabase/tests/local_stub.sql
 for f in supabase/migrations/*.sql; do
   psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f "$f"
 done
-for t in supabase/tests/m*_test.sql; do
+# m1, m2, … m10 순서 (이름순이면 m10이 m1보다 먼저 돈다)
+for t in $(ls supabase/tests/m*_test.sql | sort -V); do
   echo "== $t"
   psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f "$t"
 done
