@@ -156,6 +156,15 @@ export default function SessionPage() {
         </div>
       </Card>
 
+      {phase !== 'canceled' && now >= Date.parse(s.starts_at) - 3 * 3600_000 && now < Date.parse(s.ends_at) + 3 * 3600_000 && (
+        <Link to="board" className="mt-3 block">
+          <Card className="flex items-center justify-between bg-neutral-900 ring-neutral-900">
+            <span className="font-semibold text-white">대진판 열기</span>
+            <span className="text-sm text-neutral-300">코트 현황 · 경기 만들기</span>
+          </Card>
+        </Link>
+      )}
+
       <ActionCard s={s} phase={phase} now={now} tz={tz} myReg={myReg} myPosition={myPosition} onChanged={load} />
 
       {canManage && phase !== 'canceled' && phase !== 'ended' && <ManageCard s={s} now={now} tz={tz} onChanged={load} />}

@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './auth/AuthProvider'
 import ClubLayout from './club/ClubLayout'
 import { Page, Spinner } from './components/ui'
 import { getLastClubId } from './lib/lastClub'
+import BoardPage from './pages/BoardPage'
 import ClubHomePage from './pages/ClubHomePage'
 import ClubsPage from './pages/ClubsPage'
 import LoginPage from './pages/LoginPage'
@@ -40,6 +41,7 @@ export default function App() {
               <Route path="me" element={<MePage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="s/:sessionId" element={<SessionPage />} />
+              <Route path="s/:sessionId/board" element={<BoardPage />} />
               <Route path="admin/members" element={<MembersAdminPage />} />
               <Route path="admin/templates" element={<TemplatesAdminPage />} />
             </Route>

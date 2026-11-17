@@ -39,6 +39,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_court_count: '코트는 1면 이상이어야 해요.',
   template_not_found: '정기운동을 찾을 수 없어요.',
   already_open: '이미 투표가 열려서 오픈 시각은 바꿀 수 없어요.',
+  not_confirmed: '참석 확정된 사람만 체크인할 수 있어요.',
+  invalid_name: '이름을 입력해주세요.',
+  need_four_players: '서로 다른 4명을 골라주세요.',
+  invalid_players: '이 운동 참석자만 경기에 넣을 수 있어요.',
+  match_not_found: '경기를 찾을 수 없어요.',
+  not_playing: '이미 끝난 경기예요. (다른 폰에서 먼저 처리했을 수 있어요)',
+  match_closed: '이미 끝났거나 취소된 경기예요.',
+  not_queued: '대기 중인 경기만 순서를 바꿀 수 있어요.',
 }
 
 /** RPC 에러를 사용자에게 보여줄 문장으로 바꾼다. */

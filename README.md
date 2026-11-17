@@ -16,8 +16,8 @@
 | M2 | 신청·취소·정원 변경 RPC, 대기자 자동 승격, 동시 신청 부하 테스트 | 완료 (SQL 테스트 34개 + 동시성 검증 21개, DB만. 화면은 M4) |
 | M3 | 정기운동 템플릿 → 세션 자동 생성(pg_cron + 홈 진입 시), 번개 개설, 세션 수정/취소 RPC, 홈 일정 목록 | 완료 (SQL 테스트 34개) |
 | M4 | 일정 상세: 서버 시각 카운트다운, 참석/대기 신청·취소, 늦참 시각, 명단 실시간 갱신, 정원 변경·일정 수정·운동 취소 | 완료 (실서버 응답 시간은 파일럿에서 측정) |
-| M5 | 대진판 (코트 현황, 경기 만들기, 게임 수·쉰 시간, 체크인, 게스트) | 다음 |
-| M6 | 파일럿 | 예정 |
+| M5 | 대진판: 코트 현황, 4명 골라 경기 만들기(중복 경고 1회), 종료 시 대기 1번 자동 진입, 대기 순서 변경, 게임 수·쉰 시간, 체크인, 게스트 | 완료 (SQL 테스트 39개 + 동시 조작 검증) |
+| M6 | 파일럿 | 다음 |
 
 ## 폴더 구조
 
@@ -28,10 +28,12 @@ supabase/
   migrations/20261116020000_sessions.sql      템플릿·세션 생성·번개·세션 수정/취소, 일정 목록 뷰 (M3)
   migrations/20261116030000_cron.sql          pg_cron 매시간 세션 생성 (pg_cron 없으면 건너뜀)
   migrations/20261116040000_realtime.sql      신청 명단 실시간 갱신용 Realtime 등록 (M4)
+  migrations/20261117000000_board.sql         대진판 RPC·선수 통계 뷰·matches Realtime (M5)
   tests/local_stub.sql                 로컬 검증용 Supabase 스텁 (실서버 적용 금지)
   tests/m1_test.sql                    가입/승인/RLS 격리 테스트
   tests/m2_test.sql                    신청/취소/승격/정원 변경 테스트
   tests/m3_test.sql                    세션 생성 규칙·번개·세션 관리·목록 뷰 테스트
+  tests/m5_test.sql                    대진판 테스트
   tests/run_local.sh                   로컬 Postgres로 마이그레이션 + 테스트 실행
   tests/load/run_load.sh               pgbench 동시 신청 테스트 (100명 동시)
 src/
@@ -96,7 +98,7 @@ npm run dev                  # http://localhost:5173
 
 ```bash
 # 로컬 Postgres 16 필요
-DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/run_local.sh        # 기능 (M1 41 + M2 34 + M3 34개)
+DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/run_local.sh        # 기능 (M1 41 + M2 34 + M3 34 + M5 39개)
 DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/run_load.sh   # 동시성 (max_connections ≥ 150)
 ```
 
@@ -117,6 +119,20 @@ DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/r
 - 버튼이 켜지는 시점은 화면 표시일 뿐이고, 신청 가능 여부는 항상 서버가 판정한다
 - 신청 결과에 서버 왕복 시간(ms)을 표시한다 → 파일럿 때 실제 응답 시간 확인용
 - 명단은 Realtime으로 갱신하되, 오픈 순간 이벤트가 몰리므로 기기마다 0.8~1.5초 무작위 지연 후 한 번만 다시 읽는다
+
+### 대진판 (M5)
+
+- 일정 상세에서 운동 3시간 전부터 끝나고 3시간까지 `대진판 열기`가 보인다
+- 조작은 그 운동의 참석 확정자와 운영진만. 그 외 회원은 보기만
+- 참석자 목록은 도착한 사람 → 게임 수 적은 순 → 오래 쉰 순. 30분 이상 쉰 사람은 노란색
+- 쉰 시간 = 지금 − max(마지막 경기 종료, 체크인). 늦참은 도착 체크인부터 세서 손해 보지 않는다
+- 4명을 눌러 경기 만들기. 이미 경기 중이거나 대기 경기에 있는 사람이 있으면 경고 1회, 다시 누르면 진행
+- 빈 코트가 있으면 새 경기가 바로 들어가고, 경기를 종료하면 대기 1번이 그 코트로 자동 진입
+- 종료·취소 버튼은 실수 방지로 두 번 눌러야 실행 (3초 안)
+- 모든 대진 RPC는 세션 행을 잠그고 처리 → 여러 폰에서 동시에 눌러도 코트 중복 배정·순서 꼬임 없음
+  (로컬 검증: 10명이 동시에 경기 생성 → 코트 2면 각 1경기 + 대기 8경기 순번 중복 없음,
+  같은 경기를 8대가 동시에 종료 → 2경기만 종료, 대기 2경기 정확히 진입)
+- 참석 취소한 사람이 이미 대기 경기에 들어가 있으면 그 경기는 그대로 남는다 → 필요하면 경기를 삭제하고 다시 만든다
 
 ### 투표 동시성 설계 (M2)
 
