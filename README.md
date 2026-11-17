@@ -241,16 +241,16 @@ DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/r
 3. 키 만들기 (내 컴퓨터 터미널)
    ```bash
    npx web-push generate-vapid-keys      # Public Key, Private Key가 나온다
-   openssl rand -hex 32                  # PUSH_SECRET으로 쓸 임의 문자열
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # PUSH_SECRET으로 쓸 임의 문자열 (윈도우에서도 됨)
    ```
 4. Edge Function 배포 (레포 폴더에서)
    ```bash
    npx supabase login
    npx supabase link --project-ref <프로젝트 ref>     # 대시보드 주소 /project/<ref>
-   npx supabase secrets set VAPID_PUBLIC_KEY=<Public Key> VAPID_PRIVATE_KEY=<Private Key> \
-     VAPID_SUBJECT=mailto:<운영진 메일> PUSH_SECRET=<3번 임의 문자열> APP_URL=https://bintss.github.io/badminton-FLY
+   npx supabase secrets set VAPID_PUBLIC_KEY=<Public Key> VAPID_PRIVATE_KEY=<Private Key> VAPID_SUBJECT=mailto:<운영진 메일> PUSH_SECRET=<3번 임의 문자열> APP_URL=https://bintss.github.io/badminton-FLY
    npx supabase functions deploy send-push --no-verify-jwt
    ```
+   (secrets set은 한 줄로. Docker가 없어도 배포된다. 터미널 대신 대시보드로 하는 방법: Edge Functions → Deploy a new function → Via Editor, 이름 `send-push`, `supabase/functions/send-push/index.ts` 내용 붙여넣기 → 배포 후 JWT 검증 끄기, 비밀값은 Edge Functions → Secrets)
    Private Key와 PUSH_SECRET은 저장소·앱 코드에 넣지 않는다 (Supabase 비밀값에만)
 5. SQL Editor에서 DB가 함수를 부를 수 있게 Vault에 저장
    ```sql
