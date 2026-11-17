@@ -10,7 +10,7 @@ import { DEFAULT_TZ, formatDateTime, formatTime, toDateInput, toTimeInput, trimS
 import { useCountdownNow } from '../lib/serverTime'
 import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStatus'
 import { errorMessage, supabase } from '../lib/supabase'
-import { STATE_LABEL } from '../lib/tournament'
+import { STATE_LABEL, tournamentActive } from '../lib/tournament'
 import type { RegistrationRow, SessionOverview } from '../lib/types'
 
 function splitLeft(ms: number) {
@@ -271,6 +271,21 @@ function ActionCard({
   const [busy, setBusy] = useState(false)
   const [latency, setLatency] = useState<number | null>(null)
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [myTournamentGames, setMyTournamentGames] = useState(0)
+
+  // 대진이 공개된 대회에서 취소하려 하면, 내가 든 시작 전 대회 경기 수를 알려준다
+  const askCancel = async () => {
+    setConfirmCancel(true)
+    setMyTournamentGames(0)
+    if (!myReg || !tournamentActive(s)) return
+    const { count } = await supabase
+      .from('match_players')
+      .select('match_id, matches!inner(phase, status)', { count: 'exact', head: true })
+      .eq('registration_id', myReg.id)
+      .eq('matches.phase', 'scheduled')
+      .eq('matches.status', 'queued')
+    setMyTournamentGames(count ?? 0)
+  }
 
   const register = async () => {
     setBusy(true)
@@ -337,7 +352,7 @@ function ActionCard({
 
             <div className="mt-4">
               {!confirmCancel ? (
-                <Button variant="ghost" className="w-full text-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>
+                <Button variant="ghost" className="w-full text-danger" disabled={busy} onClick={() => void askCancel()}>
                   참석 취소
                 </Button>
               ) : (
@@ -349,6 +364,11 @@ function ActionCard({
                     참석 취소하기
                   </Button>
                 </div>
+              )}
+              {confirmCancel && myTournamentGames > 0 && (
+                <p className="mt-2 rounded-lg bg-shuttle-100 px-3 py-2 text-center text-[13px] font-medium text-shuttle-800">
+                  대회 경기 {myTournamentGames}개에 들어 있어요. 취소하면 운영진이 다른 사람으로 바꿔야 해요.
+                </p>
               )}
               {confirmCancel && isConfirmed && <p className="mt-2 text-center text-xs text-ink-soft">취소하면 대기 1번이 자동으로 확정돼요.</p>}
             </div>

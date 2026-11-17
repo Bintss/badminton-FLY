@@ -12,6 +12,7 @@ import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
 import { KIND_LABEL, autoDraft, draftNotes, gameKind, levelScore, type Gender, type GameKind } from '../lib/autoDraft'
 import { GenderMark, GenderToggle } from '../components/GenderToggle'
+import { LevelPicker } from '../components/LevelPicker'
 import { errorMessage, supabase } from '../lib/supabase'
 import {
   SCHEDULED_COLUMNS,
@@ -38,6 +39,7 @@ interface Reg {
   user_id: string | null
   guest_name: string | null
   guest_gender: Gender | null
+  guest_level: string | null
   status: RegistrationStatus
   seq: number
   checked_in_at: string | null
@@ -73,6 +75,7 @@ export default function TournamentPage() {
   const [matches, setMatches] = useState<MatchWithPhase[]>([])
   const [levels, setLevels] = useState<Record<string, string>>({})
   const [genders, setGenders] = useState<Record<string, Gender>>({})
+  const [members, setMembers] = useState<{ user_id: string; name: string }[]>([])
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
@@ -81,7 +84,7 @@ export default function TournamentPage() {
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
         .from('registrations')
-        .select('id, kind, user_id, guest_name, guest_gender, status, seq, checked_in_at, profiles!registrations_user_id_fkey(display_name)')
+        .select('id, kind, user_id, guest_name, guest_gender, guest_level, status, seq, checked_in_at, profiles!registrations_user_id_fkey(display_name)')
         .eq('session_id', sessionId)
         .order('seq'),
       // 대회 경기 전부 + (다른 코트에서 경기 중인지 알기 위해) 진행 중인 자율 경기
@@ -106,15 +109,22 @@ export default function TournamentPage() {
   }, [load])
 
   const loadMembers = useCallback(async () => {
-    const { data } = await supabase.from('club_members').select('user_id, level, gender').eq('club_id', club.id).eq('status', 'approved')
+    const { data } = await supabase
+      .from('club_members')
+      .select('user_id, level, gender, profiles!club_members_user_id_fkey(display_name)')
+      .eq('club_id', club.id)
+      .eq('status', 'approved')
     const lv: Record<string, string> = {}
     const gd: Record<string, Gender> = {}
-    for (const m of data ?? []) {
-      if (m.level) lv[m.user_id as string] = m.level as string
-      if (m.gender) gd[m.user_id as string] = m.gender as Gender
+    const ms: { user_id: string; name: string }[] = []
+    for (const m of (data ?? []) as unknown as { user_id: string; level: string | null; gender: Gender | null; profiles: { display_name: string } | null }[]) {
+      if (m.level) lv[m.user_id] = m.level
+      if (m.gender) gd[m.user_id] = m.gender
+      ms.push({ user_id: m.user_id, name: m.profiles?.display_name ?? '이름 없음' })
     }
     setLevels(lv)
     setGenders(gd)
+    setMembers(ms.sort((a, b) => a.name.localeCompare(b.name, 'ko')))
   }, [club.id])
   useEffect(() => {
     void loadMembers()
@@ -152,13 +162,14 @@ export default function TournamentPage() {
         return r ? (r.guest_name ?? r.profiles?.display_name ?? '이름 없음') : '?'
       },
       levelOf: (id) => {
-        const u = byId[id]?.user_id
-        return u ? levels[u] : undefined
+        const r = byId[id]
+        if (!r) return undefined
+        return r.kind === 'guest' ? (r.guest_level ?? undefined) : r.user_id ? levels[r.user_id] : undefined
       },
       isConfirmed: (id) => byId[id]?.status === 'confirmed',
       scoreOf: (id) => {
-        const u = byId[id]?.user_id
-        return levelScore(u ? levels[u] : null)
+        const r = byId[id]
+        return levelScore(r?.kind === 'guest' ? r.guest_level : r?.user_id ? levels[r.user_id] : null)
       },
       genderOf: (id) => {
         const r = byId[id]
@@ -220,6 +231,10 @@ export default function TournamentPage() {
       )}
 
       {isAdmin && s.kind === 'tournament' && !s.canceled_at && <SettingsCard s={s} players={roster.confirmed.length} onChanged={load} />}
+
+      {isAdmin && s.kind === 'tournament' && !s.canceled_at && state !== 'finished' && (
+        <RosterCard s={s} regs={regs} roster={roster} members={members} onChanged={load} />
+      )}
 
       {isAdmin && s.kind === 'tournament' && state === 'draft' && !s.canceled_at && (
         <ScheduleEditor s={s} roster={roster} matches={scheduled} onChanged={load} />
@@ -318,6 +333,212 @@ function SettingsCard({ s, players, onChanged }: { s: SessionOverview; players: 
 }
 
 // ---------------------------------------------------------------------
+// 참가자 명단 (운영진): 회원 추가·빼기, 대기자 바로 확정, 게스트 미리 추가
+// ---------------------------------------------------------------------
+function RosterCard({
+  s,
+  regs,
+  roster,
+  members,
+  onChanged,
+}: {
+  s: SessionOverview
+  regs: Reg[]
+  roster: Roster
+  members: { user_id: string; name: string }[]
+  onChanged: () => Promise<void>
+}) {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [picker, setPicker] = useState(false)
+  const [query, setQuery] = useState('')
+  const [guestOpen, setGuestOpen] = useState(false)
+  const [guestName, setGuestName] = useState('')
+  const [guestGender, setGuestGender] = useState<Gender | null>(null)
+  const [guestLevel, setGuestLevel] = useState<string | null>(null)
+
+  const confirmed = regs.filter((r) => r.status === 'confirmed')
+  const waitlisted = regs.filter((r) => r.status === 'waitlisted')
+  const active = new Set(regs.filter((r) => r.kind === 'member' && r.status !== 'canceled').map((r) => r.user_id))
+  const candidates = members.filter((m) => !active.has(m.user_id) && m.name.includes(query.trim()))
+  const memberConfirmed = confirmed.filter((r) => r.kind === 'member').length
+
+  const call = async (fn: () => PromiseLike<{ data: unknown; error: unknown }>, ok: (data: unknown) => string) => {
+    setBusy(true)
+    const { data, error } = await fn()
+    setBusy(false)
+    if (error) toast.error(errorMessage(error))
+    else toast.success(ok(data))
+    await onChanged()
+    return !error
+  }
+
+  const addMember = (userId: string, name: string, fromWait: boolean) =>
+    call(
+      () => supabase.rpc('roster_add_member', { p_session: s.id, p_user: userId }),
+      () => `${name}님을 ${fromWait ? '대기에서 ' : ''}참석 확정했어요${memberConfirmed >= s.capacity ? `. 정원을 ${memberConfirmed + 1}명으로 늘렸어요` : ''}`,
+    )
+
+  const remove = (r: Reg) =>
+    call(
+      () => supabase.rpc('roster_remove', { p_registration: r.id }),
+      (n) =>
+        `${roster.nameOf(r.id)}님을 뺐어요${(n as number) > 0 ? `. 대회 경기 ${n}개는 선수 교체가 필요해요` : ''}${r.status === 'confirmed' && waitlisted.length > 0 && r.kind === 'member' ? '. 대기 1번이 확정됐어요' : ''}`,
+    )
+
+  const addGuest = async () => {
+    const ok = await call(
+      () => supabase.rpc('roster_add_guest', { p_session: s.id, p_name: guestName.trim(), p_gender: guestGender, p_level: guestLevel }),
+      () => `게스트 ${guestName.trim()}님을 넣었어요`,
+    )
+    if (ok) {
+      setGuestOpen(false)
+      setGuestName('')
+      setGuestGender(null)
+      setGuestLevel(null)
+    }
+  }
+
+  const row = (r: Reg, action: ReactNode) => (
+    <div key={r.id} className="flex items-center gap-2 py-2">
+      <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
+        <GenderMark g={roster.genderOf(r.id)} className="mr-1" />
+        <span className="font-semibold">{roster.nameOf(r.id)}</span>
+        {roster.levelOf(r.id) && <span className="ml-1 text-xs text-ink-faint">{roster.levelOf(r.id)}</span>}
+        {r.kind === 'guest' && <span className="ml-1 text-xs font-medium text-ink-faint">게스트</span>}
+      </span>
+      {action}
+    </div>
+  )
+
+  return (
+    <Card className="mb-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-bold text-ink">참가자 명단</h2>
+          <p className="mt-1 text-[13px] text-ink-soft">
+            확정 {memberConfirmed}/{s.capacity}명{confirmed.length > memberConfirmed && ` + 게스트 ${confirmed.length - memberConfirmed}명`}
+            {waitlisted.length > 0 && `, 대기 ${waitlisted.length}명`}
+          </p>
+        </div>
+        <button type="button" onClick={() => setOpen((v) => !v)} className="h-9 shrink-0 rounded-lg px-3 text-sm font-semibold text-court-600 active:bg-court-50">
+          {open ? '닫기' : '명단 관리'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 border-t border-black/[0.06] pt-3">
+          <div className="flex gap-2">
+            <Button variant="secondary" className="h-10 flex-1 text-sm" disabled={busy} onClick={() => setPicker(true)}>
+              회원 추가
+            </Button>
+            <Button variant="secondary" className="h-10 flex-1 text-sm" disabled={busy} onClick={() => setGuestOpen(true)}>
+              게스트 추가
+            </Button>
+          </div>
+          {s.tournament_state !== 'draft' && (
+            <p className="mt-2 text-xs leading-relaxed text-ink-faint">대진이 확정돼서, 새로 넣은 사람은 대회 경기가 없어요. 선수 교체 후보가 되거나 대회 뒤 자율 대진에서 쳐요.</p>
+          )}
+
+          <p className="mt-3 text-[13px] font-semibold text-ink-soft">참석 확정</p>
+          <div className="divide-y divide-black/[0.05]">
+            {confirmed.map((r) =>
+              row(
+                r,
+                <ConfirmButton
+                  label="빼기"
+                  confirmLabel="한 번 더"
+                  className="h-9 shrink-0 bg-black/[0.05] px-3 text-sm text-ink-soft"
+                  armedClassName="h-9 shrink-0 bg-danger px-3 text-sm text-white"
+                  disabled={busy}
+                  onConfirm={() => void remove(r)}
+                />,
+              ),
+            )}
+          </div>
+
+          {waitlisted.length > 0 && (
+            <>
+              <p className="mt-3 text-[13px] font-semibold text-ink-soft">대기 (신청 순)</p>
+              <div className="divide-y divide-black/[0.05]">
+                {waitlisted.map((r) =>
+                  row(
+                    r,
+                    <div className="flex shrink-0 gap-1.5">
+                      <Button className="h-9 px-3 text-sm" disabled={busy} onClick={() => void addMember(r.user_id!, roster.nameOf(r.id), true)}>
+                        확정
+                      </Button>
+                      <ConfirmButton
+                        label="빼기"
+                        confirmLabel="한 번 더"
+                        className="h-9 bg-black/[0.05] px-3 text-sm text-ink-soft"
+                        armedClassName="h-9 bg-danger px-3 text-sm text-white"
+                        disabled={busy}
+                        onConfirm={() => void remove(r)}
+                      />
+                    </div>,
+                  ),
+                )}
+              </div>
+              <p className="mt-1 text-xs text-ink-faint">확정을 누르면 정원이 찼어도 바로 들어가고, 정원이 1명 늘어요.</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {picker && (
+        <Sheet title="회원 추가" onClose={() => setPicker(false)}>
+          <div className="p-4 pb-2">
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="이름으로 찾기" aria-label="회원 이름으로 찾기" className="!mt-0" />
+            <p className="mt-2 text-xs text-ink-faint">신청하지 않은 회원이에요. 누르면 바로 참석 확정돼요.</p>
+          </div>
+          <div className="divide-y divide-black/[0.06]">
+            {candidates.map((m) => (
+              <button
+                key={m.user_id}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setPicker(false)
+                  setQuery('')
+                  void addMember(m.user_id, m.name, false)
+                }}
+                className="flex min-h-14 w-full items-center px-4 py-2 text-left text-[15px] font-semibold text-ink active:bg-black/5"
+              >
+                {m.name}
+              </button>
+            ))}
+            {candidates.length === 0 && <p className="px-4 py-6 text-center text-sm text-ink-soft">{query ? '찾는 회원이 없어요' : '모든 회원이 이미 신청했어요'}</p>}
+          </div>
+        </Sheet>
+      )}
+
+      {guestOpen && (
+        <Sheet title="게스트 추가" onClose={() => setGuestOpen(false)}>
+          <div className="space-y-4 p-4">
+            <Field label="이름">
+              <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={30} placeholder="게스트 이름" />
+            </Field>
+            <Field label="성별" asGroup>
+              <div>
+                <GenderToggle value={guestGender} onChange={setGuestGender} />
+              </div>
+            </Field>
+            <Field label="급수" asGroup hint="자동 대진에서 실력을 맞출 때 써요. 모르면 비워두세요 (C조로 계산).">
+              <LevelPicker value={guestLevel} onChange={setGuestLevel} />
+            </Field>
+            <Button className="w-full" disabled={busy || !guestName.trim()} onClick={() => void addGuest()}>
+              게스트 넣기
+            </Button>
+          </div>
+        </Sheet>
+      )}
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------
 // 대진 짜기 (운영진, 확정 전): 자동 초안 + 탭 두 번으로 자리 바꾸기
 // ---------------------------------------------------------------------
 /** 편집 중 고른 자리: 경기의 한 칸 또는 쉬는 사람 */
@@ -367,6 +588,8 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
           ? `매치 수보다 뒤에 있는 경기가 ${check.outOfRange}개 있어요.`
           : null
   const hasAnyone = drafts.some((d) => draftPlayers(d).length > 0)
+  // 대진을 짠 뒤 새로 들어온 사람 (게임 0개)
+  const unassigned = check.complete.length > 0 ? roster.confirmed.filter((p) => (check.counts[p.id] ?? 0) === 0) : []
 
   const update = (fn: (ds: DraftMatch[]) => DraftMatch[]) => {
     setDrafts(fn)
@@ -486,6 +709,15 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
           만들어요. 성별이 있으면 모든 경기를 혼복·남복·여복 중 하나로, 한 사람이 같은 종목만 하지 않게 골고루 섞어요. 직접 짜려면 빈 자리를 누르고 아래
           쉬는 사람을 누르세요.
         </p>
+      )}
+
+      {hasAnyone && unassigned.length > 0 && (
+        <div className="mb-4 rounded-xl bg-shuttle-100 px-3 py-3 text-[13px] leading-relaxed text-shuttle-800">
+          <p className="font-semibold">명단이 바뀌었어요</p>
+          <p>
+            {unassigned.map((p) => roster.nameOf(p.id)).join(', ')}님이 대진에 없어요. 자동으로 다시 짜거나, 매치마다 쉬는 사람에서 골라 넣으세요.
+          </p>
+        </div>
       )}
 
       {anyGender && noGender.length > 0 && (
@@ -763,6 +995,9 @@ function ScheduleView({
   const doneCount = scheduled.filter((m) => m.status === 'finished').length
   const liveCount = scheduled.filter((m) => m.status !== 'canceled').length
 
+  // 사람별 대회 경기 수 (취소된 경기 제외)
+  const tGames: Record<string, number> = {}
+  for (const m of scheduled) if (m.status !== 'canceled') for (const p of m.match_players) tGames[p.registration_id] = (tGames[p.registration_id] ?? 0) + 1
   const subRound = sub?.match.round_no
   const inSubRound = new Set(
     scheduled.filter((m) => m.round_no === subRound && m.status !== 'canceled').flatMap((m) => m.match_players.map((p) => p.registration_id)),
@@ -970,6 +1205,12 @@ function ScheduleView({
           <div className="divide-y divide-black/[0.06]">
             {roster.confirmed
               .filter((p) => !inSubRound.has(p.id))
+              // 추천 순: 대회 경기가 적은 사람, 그다음 빠지는 사람과 실력이 비슷한 사람
+              .sort(
+                (a, b) =>
+                  (tGames[a.id] ?? 0) - (tGames[b.id] ?? 0) ||
+                  Math.abs(roster.scoreOf(a.id) - roster.scoreOf(sub.out)) - Math.abs(roster.scoreOf(b.id) - roster.scoreOf(sub.out)),
+              )
               .map((p) => (
                 <button
                   key={p.id}
@@ -988,7 +1229,9 @@ function ScheduleView({
                   <span className="truncate text-[15px] font-semibold text-ink">{roster.nameOf(p.id)}</span>
                   {roster.levelOf(p.id) && <Badge tone="outline">{roster.levelOf(p.id)}</Badge>}
                   {p.kind === 'guest' && <Badge>게스트</Badge>}
-                  {!p.checked_in_at && <span className="ml-auto text-xs text-ink-faint">아직 안 옴</span>}
+                  <span className="ml-auto shrink-0 text-xs text-ink-faint">
+                    대회 {tGames[p.id] ?? 0}경기{!p.checked_in_at && ', 아직 안 옴'}
+                  </span>
                 </button>
               ))}
             {roster.confirmed.every((p) => inSubRound.has(p.id)) && (
