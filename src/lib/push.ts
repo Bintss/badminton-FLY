@@ -99,6 +99,7 @@ export const NOTIFICATION_KINDS = [
   { kind: 'vote_created', label: '새 운동 투표', hint: '정기운동·번개·자체대회가 생겼을 때' },
   { kind: 'vote_soon', label: '투표 10분 전', hint: '선착순 투표가 열리기 10분 전' },
   { kind: 'court_assigned', label: '코트 배정', hint: '내 경기가 코트에 들어갔을 때' },
+  { kind: 'court_next', label: '코트 대기 (자체대회)', hint: '내 경기가 그 코트의 바로 다음 차례일 때' },
   { kind: 'join_approved', label: '가입 승인', hint: '동아리 가입이 승인됐을 때' },
   { kind: 'join_request', label: '가입 신청 (운영진)', hint: '누군가 가입을 신청했을 때' },
 ] as const

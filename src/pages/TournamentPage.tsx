@@ -15,7 +15,7 @@ import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { LevelPicker } from '../components/LevelPicker'
 import { errorMessage, supabase } from '../lib/supabase'
 import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
-import {
+import { courtOf,
   SCHEDULED_COLUMNS,
   STATE_LABEL,
   blockReason,
@@ -781,7 +781,7 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
           return (
             <div key={d.key} className="rounded-2xl border border-black/[0.06] bg-white p-2">
               <div className="flex items-center gap-2">
-                <span className="score w-6 shrink-0 text-center text-[19px] font-semibold text-court-600">{i + 1}</span>
+                <CourtNo n={courtOf(i + 1, s.court_count)} />
                 <div className="grid min-w-0 flex-1 grid-cols-[1fr_auto_1fr] items-center gap-1.5">
                   {([1, 2] as const).map((team) => (
                     <div key={team} className={`grid gap-1 ${team === 2 ? 'col-start-3' : ''}`}>
@@ -798,7 +798,7 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
                 </div>
                 <button
                   type="button"
-                  aria-label={`매치 ${round} ${i + 1}경기 지우기`}
+                  aria-label={`매치 ${round} 코트 ${courtOf(i + 1, s.court_count)} 경기 지우기`}
                   onClick={() => {
                     setSel(null)
                     update((all) => all.filter((x) => x.key !== d.key))
@@ -1036,7 +1036,7 @@ function ScheduleView({
           {mine.length === 0 ? (
             <p className="mt-2 text-sm text-ink-soft">이번 대진에 내 경기가 없어요.</p>
           ) : myNext ? (
-            <MyNext m={myNext} myRegId={myRegId} roster={roster} reason={active && myNext.status === 'queued' ? blockReason(myNext, info) : null} />
+            <MyNext m={myNext} courts={s.court_count} myRegId={myRegId} roster={roster} reason={active && myNext.status === 'queued' ? blockReason(myNext, info) : null} />
           ) : (
             <p className="mt-2 text-sm text-ink-soft">내 경기를 모두 마쳤어요.</p>
           )}
@@ -1048,7 +1048,7 @@ function ScheduleView({
         <Card className="mb-4">
           <h2 className="text-[15px] font-bold text-ink">대회 진행</h2>
           <p className="mt-1 text-sm leading-relaxed text-ink-soft">
-            대기 경기의 이름을 누르면 선수를 바꿀 수 있어요. 4명이 모두 도착하면 순서대로 빈 코트에 들어가요.
+            대기 경기의 이름을 누르면 선수를 바꿀 수 있어요. 경기마다 왼쪽에 적힌 코트로 들어가요. 그 코트의 앞 경기가 끝나고 4명이 모두 오면 시작해요.
           </p>
           <div className="mt-3 flex gap-2">
             {s.tournament_state === 'published' && (
@@ -1100,7 +1100,7 @@ function ScheduleView({
                       onKeyDown={tappable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setScoring(m)) : undefined}
                       className={`flex items-center gap-2 px-3 py-2.5 ${isMine ? 'bg-court-50' : ''} ${m.status === 'canceled' ? 'opacity-50' : ''} ${tappable ? 'cursor-pointer active:bg-floor' : ''}`}
                     >
-                      <span className="score w-6 shrink-0 text-center text-[19px] font-semibold text-court-600">{m.order_no}</span>
+                      <CourtNo n={courtOf(m.order_no, s.court_count)} />
                       <div className="min-w-0 flex-1">
                         {editable ? (
                           <div className="flex flex-wrap items-center gap-1 text-[15px] text-ink">
@@ -1152,7 +1152,7 @@ function ScheduleView({
                       {editable && (
                         <ConfirmButton
                           label={<IconX />}
-                          ariaLabel={`매치 ${r} ${m.order_no}경기 취소`}
+                          ariaLabel={`매치 ${r} 코트 ${courtOf(m.order_no, s.court_count)} 경기 취소`}
                           confirmLabel="취소"
                           className="h-10 w-10 shrink-0 bg-black/[0.05] text-ink-soft"
                           armedClassName="h-10 shrink-0 px-3 bg-danger text-white text-sm"
@@ -1171,7 +1171,7 @@ function ScheduleView({
       {scoring && (
         <ScoreSheet
           mode="edit"
-          title={`매치 ${scoring.round_no} · ${scoring.order_no}경기 ${scoring.result_kind ? '점수 고치기' : '점수 입력'}`}
+          title={`매치 ${scoring.round_no} · 코트 ${courtOf(scoring.order_no, s.court_count)} ${scoring.result_kind ? '점수 고치기' : '점수 입력'}`}
           team1={teamsOf(scoring.match_players)[0].map(roster.nameOf).join(', ')}
           team2={teamsOf(scoring.match_players)[1].map(roster.nameOf).join(', ')}
           target={s.score_target}
@@ -1185,7 +1185,7 @@ function ScheduleView({
       )}
 
       {forfeit && (
-        <Sheet title={`매치 ${forfeit.round_no} · ${forfeit.order_no}경기 기권 처리`} onClose={() => setForfeit(null)}>
+        <Sheet title={`매치 ${forfeit.round_no} · 코트 ${courtOf(forfeit.order_no, s.court_count)} 경기 기권 처리`} onClose={() => setForfeit(null)}>
           <div className="space-y-2 p-4">
             <p className="text-sm leading-relaxed text-ink-soft">끝내 안 온 팀이 있을 때 써요. 경기는 치지 않은 채 끝나고, 게임 수에는 들어가지 않아요.</p>
             {([1, 2] as const).map((team) => (
@@ -1289,6 +1289,16 @@ function ResultBadge({ m, canEnter }: { m: ScheduledMatch; canEnter: boolean }) 
   )
 }
 
+/** 대진표 왼쪽 칸: 이 경기가 들어갈 코트 */
+function CourtNo({ n }: { n: number }) {
+  return (
+    <span className="flex w-8 shrink-0 flex-col items-center leading-none text-court-600" aria-label={`코트 ${n}`}>
+      <span className="text-[10px] font-semibold">코트</span>
+      <span className="score text-[19px] font-semibold">{n}</span>
+    </span>
+  )
+}
+
 function StatusBadge({ m }: { m: ScheduledMatch }) {
   if (m.status === 'playing') return <Badge tone="court">코트 {m.court_no}</Badge>
   if (m.status === 'finished') return <Badge>끝</Badge>
@@ -1296,7 +1306,7 @@ function StatusBadge({ m }: { m: ScheduledMatch }) {
   return <Badge tone="outline">대기</Badge>
 }
 
-function MyNext({ m, myRegId, roster, reason }: { m: ScheduledMatch; myRegId: string; roster: Roster; reason: string | null }) {
+function MyNext({ m, courts, myRegId, roster, reason }: { m: ScheduledMatch; courts: number; myRegId: string; roster: Roster; reason: string | null }) {
   const [t1, t2] = teamsOf(m.match_players)
   const mineTeam = t1.includes(myRegId) ? t1 : t2
   const other = mineTeam === t1 ? t2 : t1
@@ -1304,7 +1314,7 @@ function MyNext({ m, myRegId, roster, reason }: { m: ScheduledMatch; myRegId: st
   return (
     <div className={`mt-3 rounded-xl px-3 py-3 ${m.status === 'playing' ? 'bg-court-600 text-white' : 'bg-floor'}`}>
       <p className={`text-[13px] font-bold ${m.status === 'playing' ? 'text-white/80' : 'text-ink-soft'}`}>
-        {m.status === 'playing' ? `지금 코트 ${m.court_no}에서 경기 중` : '다음 경기'}, 매치 {m.round_no} · {m.order_no}경기
+        {m.status === 'playing' ? `지금 코트 ${m.court_no}에서 경기 중, 매치 ${m.round_no}` : `다음 경기: 코트 ${courtOf(m.order_no, courts)}, 매치 ${m.round_no}`}
       </p>
       <p className={`mt-1 text-[17px] font-bold ${m.status === 'playing' ? 'text-white' : 'text-ink'}`}>
         {partner ? roster.nameOf(partner) : '?'}님과 한 팀

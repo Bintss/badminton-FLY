@@ -129,9 +129,9 @@ select save_schedule('c0000000-0000-0000-0000-0000000000b1', format('[{"round":1
 select publish_schedule('c0000000-0000-0000-0000-0000000000b1');
 select set_checked_in(r, true) from unnest(:'tr'::uuid[]) r;
 reset role;
-select pg_temp.ok((select title = '코트 1에서 경기 시작 (매치 1 · 1경기)' and body = '파트너 회원2, 상대 회원3, 회원4'
+select pg_temp.ok((select title = '코트 1에서 경기 시작 (매치 1)' and body = '파트너 회원2, 상대 회원3, 회원4'
                      from notifications where kind = 'court_assigned' and user_id = pg_temp.u(1) and session_id = 'c0000000-0000-0000-0000-0000000000b1'),
-  '대회 경기: 매치·순서, 파트너·상대');
+  '대회 경기: 매치 번호, 파트너·상대');
 
 -- ── 읽음 ──────────────────────────────────────────────────────
 set role authenticated;

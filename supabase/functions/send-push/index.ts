@@ -87,8 +87,8 @@ Deno.serve(async (req) => {
           targets.map(async (s) => {
             try {
               await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, {
-                TTL: n.kind === 'court_assigned' ? 600 : 6 * 3600, // 코트 배정은 10분 지나면 의미 없음
-                urgency: n.kind === 'court_assigned' || n.kind === 'vote_soon' ? 'high' : 'normal',
+                TTL: n.kind === 'court_assigned' ? 600 : n.kind === 'court_next' ? 1800 : 6 * 3600, // 코트 배정 10분·코트 대기 30분 지나면 의미 없음
+                urgency: n.kind === 'court_assigned' || n.kind === 'court_next' || n.kind === 'vote_soon' ? 'high' : 'normal',
               })
               ok.add(s.id)
               return null

@@ -14,6 +14,7 @@ const KIND_LABEL: Record<string, string> = {
   vote_created: '새 운동',
   vote_soon: '투표 곧 오픈',
   court_assigned: '코트 배정',
+  court_next: '코트 대기',
 }
 
 function ago(iso: string) {

@@ -66,6 +66,13 @@ export function blockReason(m: ScheduledMatch, info: (id: string) => PlayerState
   return null
 }
 
+/** 대회 경기의 코트: 순서 번호가 곧 코트 번호. 경기가 코트보다 많으면 돌아가며 (DB scheduled_court와 같은 규칙) */
+export function courtOf(order: number | null | undefined, courts: number): number {
+  const o = Math.max(1, order ?? 1)
+  const c = Math.max(1, courts)
+  return ((o - 1) % c) + 1
+}
+
 /** 설정 화면의 예상치: 매치당 경기 수는 코트 수와 (참석자 / 4) 중 작은 값 */
 export function planEstimate(players: number, courts: number, rounds: number, minutesPerGame: number) {
   const perRound = Math.max(0, Math.min(courts, Math.floor(players / 4)))

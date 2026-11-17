@@ -13,7 +13,7 @@ import { DEFAULT_TZ, formatTime, trimSeconds } from '../lib/datetime'
 import { useServerNow } from '../lib/serverTime'
 import { errorMessage, supabase } from '../lib/supabase'
 import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
-import { blockReason, teamsOf, tournamentActive, type PlayerState, type ScheduledMatch } from '../lib/tournament'
+import { courtOf, blockReason, teamsOf, tournamentActive, type PlayerState, type ScheduledMatch } from '../lib/tournament'
 import type { SessionOverview } from '../lib/types'
 
 /** 이 시간 이상 쉰 사람은 강조 (분) */
@@ -251,7 +251,7 @@ export default function BoardPage() {
       {tMode && (
         <Link to={`/c/${club.id}/s/${s.id}/tournament`} className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-court-50 px-3 py-2.5 text-sm text-court-700 active:bg-court-100">
           <span>
-            <span className="font-bold">자체대회 진행 중.</span> 대진표 순서대로, 4명이 모두 도착한 경기부터 빈 코트에 들어가요.
+            <span className="font-bold">자체대회 진행 중.</span> 경기마다 코트가 정해져 있어요. 그 코트의 앞 경기가 끝나고 4명이 모두 오면 들어가요.
           </span>
           <span className="shrink-0 font-semibold underline underline-offset-4">대진표</span>
         </Link>
@@ -274,6 +274,7 @@ export default function BoardPage() {
           {tMode ? (
             <TournamentQueue
               queued={tQueued}
+              courts={s.court_count}
               nameOf={nameOf}
               info={(id) => {
                 const p = byId[id]
@@ -376,7 +377,7 @@ function Courts({
                 코트 <span className="score text-[18px] text-ink">{no}</span>
                 {m?.phase === 'scheduled' && (
                   <span className="ml-2 font-semibold text-court-600">
-                    매치 {m.round_no} · {m.order_no}경기
+                    매치 {m.round_no}
                   </span>
                 )}
               </span>
@@ -438,7 +439,7 @@ function Courts({
       {scoring && (
         <ScoreSheet
           mode="finish"
-          title={`코트 ${scoring.court_no} · 매치 ${scoring.round_no} · ${scoring.order_no}경기`}
+          title={`코트 ${scoring.court_no} · 매치 ${scoring.round_no}`}
           team1={teamsOf(scoring.match_players)[0].map(nameOf).join(', ')}
           team2={teamsOf(scoring.match_players)[1].map(nameOf).join(', ')}
           target={s.score_target}
@@ -531,6 +532,7 @@ function Queue({
 const TQUEUE_PREVIEW = 8
 function TournamentQueue({
   queued,
+  courts,
   nameOf,
   info,
   canCancel,
@@ -538,6 +540,7 @@ function TournamentQueue({
   onChanged,
 }: {
   queued: MatchRow[]
+  courts: number
   nameOf: (id: string) => string
   info: (id: string) => PlayerState
   canCancel: boolean
@@ -553,7 +556,7 @@ function TournamentQueue({
     setBusy(true)
     const { error } = await supabase.rpc('cancel_match', { p_match: m.id })
     if (error) toast.error(errorMessage(error))
-    else toast.info(`매치 ${m.round_no} · ${m.order_no}경기를 취소했어요`)
+    else toast.info(`매치 ${m.round_no} 코트 ${courtOf(m.order_no, courts)} 경기를 취소했어요`)
     await onChanged()
     setBusy(false)
   }
@@ -572,22 +575,24 @@ function TournamentQueue({
           {shown.map((m) => {
             const [t1, t2] = teamsOf(m.match_players)
             const reason = blockReason(m as unknown as ScheduledMatch, info)
+            const court = courtOf(m.order_no, courts)
             return (
               <div key={m.id} className="flex items-center gap-2 px-3 py-2.5">
-                <span className={`score w-9 shrink-0 text-center text-[17px] font-semibold ${reason ? 'text-ink-faint' : 'text-court-600'}`}>
-                  {m.round_no}-{m.order_no}
+                <span className={`flex w-9 shrink-0 flex-col items-center leading-none ${reason ? 'text-ink-faint' : 'text-court-600'}`}>
+                  <span className="text-[10px] font-semibold">코트</span>
+                  <span className="score text-[19px] font-semibold">{court}</span>
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[15px] leading-snug text-ink">
                     <span className="whitespace-nowrap">{t1.map(nameOf).join(', ')}</span> <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
                     <span className="whitespace-nowrap">{t2.map(nameOf).join(', ')}</span>
                   </p>
-                  <p className={`text-xs ${reason ? 'text-shuttle-800' : 'text-court-600'}`}>{reason ?? '코트가 비면 바로 들어가요'}</p>
+                  <p className={`text-xs ${reason ? 'text-shuttle-800' : 'text-court-600'}`}>{reason ? reason : `매치 ${m.round_no}. 앞 경기가 끝나면 코트 ${court}에 들어가요`}</p>
                 </div>
                 {canCancel && (
                   <ConfirmButton
                     label={<IconX />}
-                    ariaLabel={`매치 ${m.round_no} ${m.order_no}경기 취소`}
+                    ariaLabel={`매치 ${m.round_no} 코트 ${court} 경기 취소`}
                     confirmLabel="취소"
                     className="h-10 w-10 shrink-0 bg-black/[0.05] text-ink-soft"
                     armedClassName="h-10 shrink-0 px-3 bg-danger text-white text-sm"
