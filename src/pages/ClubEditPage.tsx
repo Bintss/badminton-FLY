@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { ClubLogo } from '../components/ClubLogo'
 import { Field, Input, Textarea } from '../components/form'
@@ -7,6 +7,7 @@ import { IconChevronLeft, IconPlus } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Button, Card, Empty, List, Page, SectionTitle } from '../components/ui'
 import { LOGO_BUCKET, uploadClubLogo } from '../lib/clubLogo'
+import { setLastClubId } from '../lib/lastClub'
 import { errorMessage, supabase } from '../lib/supabase'
 import type { ClubPlace } from '../lib/types'
 
@@ -243,6 +244,67 @@ export default function ClubEditPage() {
           </List>
         )
       )}
+
+      <DeleteClub clubId={club.id} clubName={club.name} />
     </Page>
+  )
+}
+
+/** 동아리 삭제: 이름을 정확히 입력해야 버튼이 켜진다. 로고 파일을 먼저 지우고 DB를 지운다 */
+function DeleteClub({ clubId, clubName }: { clubId: string; clubName: string }) {
+  const toast = useToast()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const remove = async () => {
+    setBusy(true)
+    // Storage 정책이 운영진 권한을 보므로 동아리를 지우기 전에 로고부터
+    const { data: files } = await supabase.storage.from(LOGO_BUCKET).list(clubId)
+    if (files && files.length > 0) await supabase.storage.from(LOGO_BUCKET).remove(files.map((f) => `${clubId}/${f.name}`))
+    const { error } = await supabase.rpc('delete_club', { p_club: clubId, p_confirm_name: confirm })
+    setBusy(false)
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    setLastClubId(null)
+    toast.success(`${clubName}을(를) 삭제했어요`)
+    navigate('/clubs', { replace: true })
+  }
+
+  return (
+    <section className="mt-10 border-t border-black/[0.08] pt-6">
+      <h2 className="text-[15px] font-bold text-danger">동아리 삭제</h2>
+      <p className="mt-1 text-sm leading-relaxed text-ink-soft">
+        운동 일정, 참석 신청, 경기·대회 기록, 회원 명단이 모두 지워지고 되돌릴 수 없어요.
+      </p>
+      {!open ? (
+        <Button variant="secondary" className="mt-3 text-danger" onClick={() => setOpen(true)}>
+          동아리 삭제하기
+        </Button>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <Field label={`확인을 위해 동아리 이름 "${clubName}"을(를) 그대로 입력하세요`}>
+            <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" />
+          </Field>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOpen(false)
+                setConfirm('')
+              }}
+            >
+              그만두기
+            </Button>
+            <Button variant="danger" className="flex-1" disabled={busy || confirm !== clubName} onClick={() => void remove()}>
+              영구 삭제
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }

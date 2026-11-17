@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input } from '../components/form'
+import { ConfirmButton } from '../components/ConfirmButton'
 import { GenderToggle } from '../components/GenderToggle'
+import { setLastClubId } from '../lib/lastClub'
 import { LevelPicker } from '../components/LevelPicker'
 import { IconChevronRight } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -19,6 +21,20 @@ export default function MePage() {
   const [gender, setGender] = useState(me.gender ?? null)
   const [busy, setBusy] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const navigate = useNavigate()
+
+  const leave = async () => {
+    setBusy(true)
+    const { error } = await supabase.rpc('leave_club', { p_club: club.id })
+    setBusy(false)
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    setLastClubId(null)
+    toast.success(`${club.name}에서 나왔어요`)
+    navigate('/clubs', { replace: true })
+  }
 
   useEffect(() => {
     if (!isAdmin) return
@@ -93,6 +109,21 @@ export default function MePage() {
           <span className="font-medium text-danger">로그아웃</span>
         </button>
       </List>
+
+      <div className="mt-6 px-1">
+        <ConfirmButton
+          label="동아리 나가기"
+          confirmLabel={`${club.name}에서 나가요. 한 번 더 누르세요`}
+          className="h-10 px-0 text-sm font-medium text-ink-faint underline underline-offset-4"
+          armedClassName="h-10 bg-danger px-3 text-sm text-white"
+          disabled={busy}
+          onConfirm={() => void leave()}
+        />
+        <p className="mt-1 text-xs leading-relaxed text-ink-faint">
+          아직 시작 안 한 운동의 참석·대기 신청은 취소돼요. 다시 들어오려면 가입 신청을 하고 운영진 승인을 받아야 해요.
+          {isAdmin && ' 마지막 운영진은 다른 사람을 운영진으로 지정한 뒤에 나갈 수 있어요.'}
+        </p>
+      </div>
     </Page>
   )
 }

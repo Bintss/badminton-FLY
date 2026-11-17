@@ -36,6 +36,8 @@ export interface ClubMember {
   level: string | null
   /** 'M' 남 / 'F' 여 / null 미입력 */
   gender: 'M' | 'F' | null
+  /** 강퇴된 시각. 있으면 다시 가입 신청 불가 */
+  banned_at: string | null
   requested_at: string
 }
 
