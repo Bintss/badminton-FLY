@@ -24,17 +24,31 @@ Deno.serve(async (req) => {
     return new Response('forbidden', { status: 403 })
   }
 
+  // 설정 확인: 무엇이 잘못됐는지 응답에 남긴다 (DB의 net._http_response에서 보임). 비밀값 자체는 절대 내보내지 않는다
+  const subject = (Deno.env.get('VAPID_SUBJECT') ?? '').trim()
+  const publicKey = (Deno.env.get('VAPID_PUBLIC_KEY') ?? '').trim()
+  const privateKey = (Deno.env.get('VAPID_PRIVATE_KEY') ?? '').trim()
+  const problems: string[] = []
+  if (!/^(mailto:|https:\/\/)/.test(subject)) problems.push('VAPID_SUBJECT는 mailto:메일주소 형식이어야 해요')
+  if (!/^[A-Za-z0-9_-]{80,90}$/.test(publicKey)) problems.push(`VAPID_PUBLIC_KEY 형식이 아니에요 (길이 ${publicKey.length}, 보통 87자)`)
+  if (!/^[A-Za-z0-9_-]{40,46}$/.test(privateKey)) problems.push(`VAPID_PRIVATE_KEY 형식이 아니에요 (길이 ${privateKey.length}, 보통 43자)`)
+  if (problems.length) return json({ ok: false, step: 'config', problems }, 500)
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey)
+  } catch (e) {
+    return json({ ok: false, step: 'vapid', error: (e as Error).message }, 500)
+  }
+
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false },
   })
-  webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT')!, Deno.env.get('VAPID_PUBLIC_KEY')!, Deno.env.get('VAPID_PRIVATE_KEY')!)
   const appUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
 
   let sent = 0
   let failed = 0
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const { data: batch, error } = await supabase.rpc('claim_push_batch', { p_limit: BATCH })
-    if (error) return new Response(`claim failed: ${error.message}`, { status: 500 })
+    if (error) return json({ ok: false, step: 'claim', error: error.message }, 500)
     if (!batch || batch.length === 0) break
 
     const userIds = [...new Set(batch.map((n: { user_id: string }) => n.user_id))]
@@ -57,6 +71,12 @@ Deno.serve(async (req) => {
           tag: `${n.kind}:${n.session_id ?? n.id}`,
         })
         const targets = byUser.get(n.user_id) ?? []
+        if (targets.length === 0) {
+          // 받을 기기가 없음: 알림함에는 있으므로 처리 완료로 두되, 이유를 남긴다
+          done.push(n.id)
+          errors[n.id] = 'no_device'
+          return
+        }
         const results = await Promise.all(
           targets.map(async (s) => {
             try {
@@ -89,5 +109,9 @@ Deno.serve(async (req) => {
     if (batch.length < BATCH) break
   }
 
-  return new Response(JSON.stringify({ sent, failed }), { headers: { 'Content-Type': 'application/json' } })
+  return json({ ok: true, sent, failed })
 })
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
