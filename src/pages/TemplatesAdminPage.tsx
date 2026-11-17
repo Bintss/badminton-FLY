@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Select } from '../components/form'
+import { PlaceInput } from '../components/PlaceInput'
 import { IconChevronLeft, IconPlus } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, ErrorText, ListSkeleton, Page } from '../components/ui'
@@ -137,8 +138,8 @@ export default function TemplatesAdminPage() {
                 <Input type="time" value={trimSeconds(draft.end_time)} onChange={(e) => set('end_time', e.target.value)} required />
               </Field>
             </div>
-            <Field label="장소">
-              <Input value={draft.place} onChange={(e) => set('place', e.target.value)} />
+            <Field label="장소" asGroup>
+              <PlaceInput clubId={club.id} value={draft.place} onChange={(v) => set('place', v)} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="정원">

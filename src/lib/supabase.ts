@@ -47,6 +47,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_playing: '이미 끝난 경기예요. (다른 폰에서 먼저 처리했을 수 있어요)',
   match_closed: '이미 끝났거나 취소된 경기예요.',
   not_queued: '대기 중인 경기만 순서를 바꿀 수 있어요.',
+  invalid_link: '링크는 https://로 시작해야 해요.',
+  invalid_logo_path: '로고 파일 경로가 올바르지 않아요.',
+  place_not_found: '장소를 찾을 수 없어요.',
 }
 
 /** RPC 에러를 사용자에게 보여줄 문장으로 바꾼다. */

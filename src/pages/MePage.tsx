@@ -64,6 +64,7 @@ export default function MePage() {
         <>
           <SectionTitle>운영</SectionTitle>
           <List>
+            <MenuRow to={`/c/${club.id}/admin/club`} label="동아리 정보 수정" sub="로고, 소개, 장소" />
             <MenuRow to={`/c/${club.id}/admin/templates`} label="정기운동 관리" sub="요일, 시간, 투표 오픈" />
             <MenuRow
               to={`/c/${club.id}/admin/members`}
@@ -77,6 +78,7 @@ export default function MePage() {
 
       <SectionTitle>계정</SectionTitle>
       <List>
+        <MenuRow to={`/c/${club.id}/about`} label="동아리 소개" sub="장소, 정기운동, 연락 링크" />
         <MenuRow to="/clubs" label="동아리 전환" sub="다른 동아리 가입, 새 동아리 만들기" />
         <button className="flex w-full items-center justify-between px-4 py-4 text-left active:bg-floor" onClick={() => void signOut()}>
           <span className="font-medium text-danger">로그아웃</span>

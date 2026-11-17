@@ -2,6 +2,8 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { ToastProvider } from './components/toast'
 import BoardEntryPage from './pages/BoardEntryPage'
+import ClubAboutPage from './pages/ClubAboutPage'
+import ClubEditPage from './pages/ClubEditPage'
 import ClubLayout from './club/ClubLayout'
 import { Page, Spinner } from './components/ui'
 import { getLastClubId } from './lib/lastClub'
@@ -43,6 +45,8 @@ export default function App() {
               <Route index element={<ClubHomePage />} />
               <Route path="me" element={<MePage />} />
               <Route path="board" element={<BoardEntryPage />} />
+              <Route path="about" element={<ClubAboutPage />} />
+              <Route path="admin/club" element={<ClubEditPage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="s/:sessionId" element={<SessionPage />} />
               <Route path="s/:sessionId/board" element={<BoardPage />} />

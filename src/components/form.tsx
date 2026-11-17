@@ -1,15 +1,17 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
 const inputClass =
   'mt-1.5 h-12 w-full rounded-xl border border-black/10 bg-white px-3.5 text-[16px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-court-500 focus:ring-2 focus:ring-court-100 disabled:bg-floor disabled:text-ink-faint'
 
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+export function Field({ label, hint, children, asGroup = false }: { label: string; hint?: ReactNode; children: ReactNode; asGroup?: boolean }) {
+  // 버튼이 여러 개 들어가는 입력(장소 선택 등)은 <label> 대신 group으로 감싼다
+  const Tag = asGroup ? 'div' : 'label'
   return (
-    <label className="block">
+    <Tag className="block" {...(asGroup ? { role: 'group', 'aria-label': label } : {})}>
       <span className="text-[13px] font-semibold text-ink-soft">{label}</span>
       {children}
       {hint && <span className="mt-1.5 block text-xs text-ink-faint">{hint}</span>}
-    </label>
+    </Tag>
   )
 }
 
@@ -47,5 +49,14 @@ export function Segmented<T extends string>({
         </button>
       ))}
     </div>
+  )
+}
+
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={`mt-1.5 min-h-28 w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-[16px] leading-relaxed text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-court-500 focus:ring-2 focus:ring-court-100 ${props.className ?? ''}`}
+    />
   )
 }

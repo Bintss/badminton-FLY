@@ -33,6 +33,7 @@ export default function ClubHomePage() {
       .from('session_overview')
       .select('*')
       .eq('club_id', club.id)
+      .is('canceled_at', null) // 취소된 운동은 목록에서 뺀다
       .gt('ends_at', new Date(serverNow()).toISOString())
       .order('starts_at')
       .limit(30)
@@ -46,6 +47,12 @@ export default function ClubHomePage() {
     void load()
   }, [load])
 
+  // 화면을 켜 둔 사이에 끝난 운동도 바로 사라지게 (종료·취소는 안 보임)
+  const visible = sessions?.filter((s) => {
+    const phase = sessionPhase(s, now)
+    return phase !== 'ended' && phase !== 'canceled'
+  })
+
   return (
     <Page
       title="일정"
@@ -57,14 +64,14 @@ export default function ClubHomePage() {
       }
     >
       {!sessions && <ListSkeleton rows={3} />}
-      {sessions?.length === 0 && (
+      {visible?.length === 0 && (
         <Empty title="예정된 운동이 없어요">
           {isAdmin ? '내 정보 탭의 정기운동 관리에서 정기운동을 등록하면, 투표 오픈 7일 전부터 여기에 보여요.' : '오른쪽 위 번개 버튼으로 운동을 열 수 있어요.'}
         </Empty>
       )}
 
       <ul className="space-y-2.5">
-        {sessions?.map((s) => {
+        {visible?.map((s) => {
           const phase = sessionPhase(s, now)
           const d = dateParts(s.starts_at, tz)
           const full = s.confirmed_count >= s.capacity
@@ -73,7 +80,7 @@ export default function ClubHomePage() {
             <li key={s.id}>
               <Link
                 to={`s/${s.id}`}
-                className={`flex gap-3.5 rounded-2xl border border-black/[0.06] bg-white p-3.5 active:bg-floor ${phase === 'canceled' ? 'opacity-55' : ''}`}
+                className="flex gap-3.5 rounded-2xl border border-black/[0.06] bg-white p-3.5 active:bg-floor"
               >
                 {/* 날짜 블록 */}
                 <div className={`flex w-14 shrink-0 flex-col items-center justify-center rounded-xl py-2 ${d.isToday ? 'bg-court-600 text-white' : 'bg-floor text-ink'}`}>
@@ -86,7 +93,7 @@ export default function ClubHomePage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1.5">
                       {s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
-                      <span className={`truncate text-[16px] font-bold text-ink ${phase === 'canceled' ? 'line-through' : ''}`}>{s.title}</span>
+                      <span className="truncate text-[16px] font-bold text-ink">{s.title}</span>
                     </div>
                     <span className={`shrink-0 text-[13px] font-bold ${PHASE_STYLE[phase]}`}>{PHASE_LABEL[phase]}</span>
                   </div>

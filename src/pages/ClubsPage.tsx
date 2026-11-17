@@ -6,7 +6,9 @@ import { IconChevronRight } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, ListSkeleton, Page, SectionTitle } from '../components/ui'
 import { errorMessage, supabase } from '../lib/supabase'
-import type { Club, MembershipWithClub } from '../lib/types'
+import { linkLabel } from '../lib/clubLogo'
+import { CLUB_COLUMNS, type Club, type ClubPlace, type MembershipWithClub } from '../lib/types'
+import { ClubLogo } from '../components/ClubLogo'
 
 export default function ClubsPage() {
   const { session, signOut } = useAuth()
@@ -14,6 +16,8 @@ export default function ClubsPage() {
   const toast = useToast()
   const [memberships, setMemberships] = useState<MembershipWithClub[] | null>(null)
   const [clubs, setClubs] = useState<Club[]>([])
+  const [places, setPlaces] = useState<ClubPlace[]>([])
+  const [expanded, setExpanded] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
 
@@ -21,10 +25,12 @@ export default function ClubsPage() {
 
   const load = useCallback(async () => {
     if (!uid) return
-    const [mine, all] = await Promise.all([
-      supabase.from('club_members').select('*, clubs(id, name)').eq('user_id', uid).order('requested_at'),
-      supabase.from('clubs').select('id, name, created_at').order('name'),
+    const [mine, all, pl] = await Promise.all([
+      supabase.from('club_members').select('*, clubs(id, name, logo_path)').eq('user_id', uid).order('requested_at'),
+      supabase.from('clubs').select(CLUB_COLUMNS).order('name'),
+      supabase.from('club_places').select('*').order('sort'),
     ])
+    setPlaces((pl.data as ClubPlace[] | null) ?? [])
     if (mine.error || all.error) {
       toast.error(errorMessage(mine.error ?? all.error))
       return
@@ -80,16 +86,18 @@ export default function ClubsPage() {
         <List>
           {visibleMine.map((m) =>
             m.status === 'approved' ? (
-              <Link key={m.club_id} to={`/c/${m.club_id}`} className="flex items-center justify-between gap-3 px-4 py-4 active:bg-floor">
-                <div className="min-w-0">
+              <Link key={m.club_id} to={`/c/${m.club_id}`} className="flex items-center gap-3 px-4 py-3.5 active:bg-floor">
+                <ClubLogo club={{ name: m.clubs?.name ?? '?', logo_path: m.clubs?.logo_path }} size={44} />
+                <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-ink">{m.clubs?.name ?? '동아리'}</p>
                   <p className="text-sm text-ink-soft">{m.role === 'admin' ? '운영진' : '회원'}</p>
                 </div>
                 <IconChevronRight className="h-5 w-5 shrink-0 text-ink-faint" />
               </Link>
             ) : (
-              <div key={m.club_id} className="flex items-center justify-between gap-3 px-4 py-4">
-                <div className="min-w-0">
+              <div key={m.club_id} className="flex items-center gap-3 px-4 py-3.5">
+                <ClubLogo club={{ name: m.clubs?.name ?? '?', logo_path: m.clubs?.logo_path }} size={44} />
+                <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-ink">{m.clubs?.name ?? '동아리'}</p>
                   <div className="mt-1">
                     {m.status === 'pending' ? <Badge tone="shuttle">승인 기다리는 중</Badge> : <Badge>거절됨</Badge>}
@@ -113,16 +121,41 @@ export default function ClubsPage() {
       {others.length > 0 && (
         <>
           <SectionTitle>다른 동아리</SectionTitle>
-          <List>
-            {others.map((c) => (
-              <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                <p className="truncate font-medium text-ink">{c.name}</p>
-                <Button variant="secondary" className="h-10" disabled={busyId === c.id} onClick={() => void requestJoin(c.id)}>
-                  가입 신청
-                </Button>
-              </div>
-            ))}
-          </List>
+          <div className="space-y-2.5">
+            {others.map((c) => {
+              const open = expanded === c.id
+              const cp = places.filter((p) => p.club_id === c.id)
+              return (
+                <Card key={c.id}>
+                  <div className="flex items-center gap-3">
+                    <ClubLogo club={c} size={48} />
+                    <p className="min-w-0 flex-1 truncate text-[16px] font-bold text-ink">{c.name}</p>
+                    <Button variant="secondary" className="h-10 shrink-0" disabled={busyId === c.id} onClick={() => void requestJoin(c.id)}>
+                      가입 신청
+                    </Button>
+                  </div>
+                  {c.description && (
+                    <p className={`mt-3 whitespace-pre-line text-sm leading-relaxed text-ink-soft ${open ? '' : 'line-clamp-2'}`}>{c.description}</p>
+                  )}
+                  {open && cp.length > 0 && (
+                    <p className="mt-2 text-sm text-ink-soft">
+                      <span className="font-semibold text-ink">운동 장소</span> {cp.map((p) => p.name).join(', ')}
+                    </p>
+                  )}
+                  {open && c.link_url && (
+                    <a href={c.link_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-semibold text-court-600">
+                      {linkLabel(c.link_url)}
+                    </a>
+                  )}
+                  {(c.description || cp.length > 0 || c.link_url) && (
+                    <button className="mt-2 text-sm font-medium text-ink-faint" onClick={() => setExpanded(open ? null : c.id)} aria-expanded={open}>
+                      {open ? '접기' : '자세히'}
+                    </button>
+                  )}
+                </Card>
+              )
+            })}
+          </div>
         </>
       )}
 

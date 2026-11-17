@@ -5,7 +5,8 @@ import { useAuth } from '../auth/AuthProvider'
 import { Page, Spinner } from '../components/ui'
 import { setLastClubId } from '../lib/lastClub'
 import { supabase } from '../lib/supabase'
-import type { Club, ClubMember } from '../lib/types'
+import { CLUB_COLUMNS, type Club, type ClubMember } from '../lib/types'
+import { ClubLogo } from '../components/ClubLogo'
 
 interface ClubState {
   club: Club
@@ -38,7 +39,7 @@ export default function ClubLayout() {
   const load = useCallback(async () => {
     if (!clubId || !session) return
     const [club, me] = await Promise.all([
-      supabase.from('clubs').select('id, name, created_at, timezone').eq('id', clubId).maybeSingle(),
+      supabase.from('clubs').select(CLUB_COLUMNS).eq('id', clubId).maybeSingle(),
       supabase.from('club_members').select('*').eq('club_id', clubId).eq('user_id', session.user.id).maybeSingle(),
     ])
     setState({ club: club.data as Club | null, me: me.data as ClubMember | null, loaded: true })
@@ -67,8 +68,9 @@ export default function ClubLayout() {
     <ClubContext.Provider value={value}>
       <header className="sticky top-0 z-10 border-b border-black/[0.06] bg-floor/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className={`mx-auto flex h-12 items-center px-4 ${wide ? 'max-w-4xl' : 'max-w-md'}`}>
-          <Link to={`/c/${state.club.id}`} className="truncate text-[15px] font-bold text-court-700">
-            {state.club.name}
+          <Link to={`/c/${state.club.id}/about`} className="flex min-w-0 items-center gap-2" aria-label={`${state.club.name} 소개`}>
+            <ClubLogo club={state.club} size={28} />
+            <span className="truncate text-[15px] font-bold text-court-700">{state.club.name}</span>
           </Link>
         </div>
       </header>
@@ -83,7 +85,7 @@ function TabBar({ clubId }: { clubId: string }) {
   const { pathname } = useLocation()
   const base = `/c/${clubId}`
   const rest = pathname.slice(pathname.indexOf(base) + base.length)
-  const active = rest.startsWith('/board') || rest.endsWith('/board') ? 'board' : rest.startsWith('/me') || rest.startsWith('/admin') ? 'me' : 'home'
+  const active = rest.startsWith('/board') || rest.endsWith('/board') ? 'board' : rest.startsWith('/me') || rest.startsWith('/admin') || rest.startsWith('/about') ? 'me' : 'home'
 
   const tabs = [
     { key: 'home', to: base, label: '일정', Icon: IconCalendar },

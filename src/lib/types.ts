@@ -6,7 +6,22 @@ export interface Club {
   name: string
   created_at: string
   timezone?: string
+  description?: string
+  link_url?: string | null
+  logo_path?: string | null
 }
+
+export interface ClubPlace {
+  id: string
+  club_id: string
+  name: string
+  address: string
+  note: string
+  sort: number
+}
+
+/** clubs 조회에 쓰는 컬럼 목록 */
+export const CLUB_COLUMNS = 'id, name, created_at, timezone, description, link_url, logo_path'
 
 export interface Profile {
   id: string
@@ -24,7 +39,7 @@ export interface ClubMember {
 
 /** club_members + profiles + clubs 조인 결과 */
 export interface MembershipWithClub extends ClubMember {
-  clubs: Pick<Club, 'id' | 'name'> | null
+  clubs: Pick<Club, 'id' | 'name' | 'logo_path'> | null
 }
 
 export interface MemberWithProfile extends ClubMember {

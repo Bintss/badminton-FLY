@@ -52,9 +52,9 @@ export default function LoginPage() {
 
       <div className="relative mt-auto max-w-md">
         <h1 className="text-[44px] font-extrabold leading-[1.05] tracking-tight">
-          FLY
-          <br />
           배드민턴
+          <br />
+          동아리
         </h1>
         <p className="mt-4 text-[17px] leading-relaxed text-white/80">
           운동 투표는 정해진 시각에 열리고,

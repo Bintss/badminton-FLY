@@ -18,6 +18,7 @@
 | M4 | 일정 상세: 서버 시각 카운트다운, 참석/대기 신청·취소, 늦참 시각, 명단 실시간 갱신, 정원 변경·일정 수정·운동 취소 | 완료 (실서버 응답 시간은 파일럿에서 측정) |
 | M5 | 대진판: 코트 현황, 4명 골라 경기 만들기(중복 경고 1회), 종료 시 대기 1번 자동 진입, 대기 순서 변경, 게임 수·쉰 시간, 체크인, 게스트 | 완료 (SQL 테스트 39개 + 동시 조작 검증) |
 | UI | 디자인 정리(코트 초록 테마, Pretendard + Barlow Condensed 숫자), 하단 탭, 토스트·스켈레톤, 대진판 코트 그림·체크인 되돌리기·화면 꺼짐 방지·가로 모드, PWA(홈 화면 추가) | 완료 |
+| 동아리 정보 | 로고(Storage 업로드), 소개글, 연락 링크, 운동 장소 목록, 동아리 소개 화면, 가입 전 미리보기, 번개·정기운동에서 장소 선택 | 완료 (SQL 테스트 25개) |
 | M6 | 파일럿 | 다음 |
 
 ## 폴더 구조
@@ -30,11 +31,13 @@ supabase/
   migrations/20261116030000_cron.sql          pg_cron 매시간 세션 생성 (pg_cron 없으면 건너뜀)
   migrations/20261116040000_realtime.sql      신청 명단 실시간 갱신용 Realtime 등록 (M4)
   migrations/20261117000000_board.sql         대진판 RPC·선수 통계 뷰·matches Realtime (M5)
+  migrations/20261117010000_club_profile.sql  동아리 소개·링크·로고·장소, 로고 Storage 버킷과 정책
   tests/local_stub.sql                 로컬 검증용 Supabase 스텁 (실서버 적용 금지)
   tests/m1_test.sql                    가입/승인/RLS 격리 테스트
   tests/m2_test.sql                    신청/취소/승격/정원 변경 테스트
   tests/m3_test.sql                    세션 생성 규칙·번개·세션 관리·목록 뷰 테스트
   tests/m5_test.sql                    대진판 테스트
+  tests/m6_club_profile_test.sql       동아리 정보 테스트
   tests/run_local.sh                   로컬 Postgres로 마이그레이션 + 테스트 실행
   tests/load/run_load.sh               pgbench 동시 신청 테스트 (100명 동시)
 src/
@@ -130,6 +133,15 @@ DATABASE_URL=postgres://postgres@localhost:5432/postgres ./supabase/tests/load/r
   - 서비스워커는 앱 파일을 캐시하지 않는다 (배포하면 항상 최신 화면). 오프라인일 때 안내 화면만 보여준다
   - 아이콘은 `python3 scripts/make_icons.py`로 다시 만들 수 있다 (Pillow 필요)
 - 대진판을 보는 동안 화면이 꺼지지 않게 한다 (Wake Lock 지원 브라우저: Android Chrome, iOS 16.4+ Safari)
+
+### 동아리 정보
+
+- 운영진: 내 정보 > 동아리 정보 수정에서 로고, 이름, 소개(1000자), 연락 링크(https), 운동 장소(이름·주소·메모)
+- 모두: 상단 동아리 이름을 누르면 소개 화면 (정기운동 요일·시간, 장소별 카카오맵 링크, 연락 링크)
+- 가입 전 동아리 목록에서도 로고·소개·장소·링크가 보인다
+- 로고는 화면에서 가운데 기준 정사각형 512px로 줄여 `club-logos` 버킷에 `<club_id>/logo-<시각>.webp`로 올린다.
+  버킷은 공개 읽기, 업로드·삭제는 그 동아리 운영진만 (Storage 정책)
+- 번개 만들기·정기운동 등록의 장소 칸에 등록된 장소가 버튼으로 나온다
 
 ### 대진판 (M5)
 

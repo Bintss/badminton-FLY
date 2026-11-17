@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Segmented } from '../components/form'
+import { PlaceInput } from '../components/PlaceInput'
 import { IconChevronLeft } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Button, Card, ErrorText, Page } from '../components/ui'
@@ -84,8 +85,8 @@ export default function FlashNewPage() {
               <Input type="time" value={end} onChange={(e) => setEnd(e.target.value)} required />
             </Field>
           </div>
-          <Field label="장소">
-            <Input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 학교 체육관" />
+          <Field label="장소" asGroup>
+            <PlaceInput clubId={club.id} value={place} onChange={setPlace} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="정원">
