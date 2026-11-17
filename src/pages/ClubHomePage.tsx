@@ -57,10 +57,18 @@ export default function ClubHomePage() {
     <Page
       title="일정"
       action={
-        <Link to="flash/new" className="inline-flex h-10 items-center gap-1 rounded-xl bg-court-600 pl-2.5 pr-3.5 text-[15px] font-semibold text-white active:bg-court-700">
-          <IconPlus className="h-4 w-4" />
-          번개
-        </Link>
+        <div className="flex gap-1.5">
+          {isAdmin && (
+            <Link to="tournament/new" className="inline-flex h-10 items-center gap-1 rounded-xl bg-white pl-2.5 pr-3.5 text-[15px] font-semibold text-court-700 ring-1 ring-court-600/25 active:bg-court-50">
+              <IconPlus className="h-4 w-4" />
+              자체대회
+            </Link>
+          )}
+          <Link to="flash/new" className="inline-flex h-10 items-center gap-1 rounded-xl bg-court-600 pl-2.5 pr-3.5 text-[15px] font-semibold text-white active:bg-court-700">
+            <IconPlus className="h-4 w-4" />
+            번개
+          </Link>
+        </div>
       }
     >
       {!sessions && <ListSkeleton rows={3} />}
@@ -92,7 +100,7 @@ export default function ClubHomePage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1.5">
-                      {s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
+                      {s.kind === 'tournament' ? <Badge tone="court">자체대회</Badge> : s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
                       <span className="truncate text-[16px] font-bold text-ink">{s.title}</span>
                     </div>
                     <span className={`shrink-0 text-[13px] font-bold ${PHASE_STYLE[phase]}`}>{PHASE_LABEL[phase]}</span>

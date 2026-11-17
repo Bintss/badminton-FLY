@@ -10,6 +10,7 @@ import { DEFAULT_TZ, formatDateTime, formatTime, toDateInput, toTimeInput, trimS
 import { useCountdownNow } from '../lib/serverTime'
 import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStatus'
 import { errorMessage, supabase } from '../lib/supabase'
+import { STATE_LABEL } from '../lib/tournament'
 import type { RegistrationRow, SessionOverview } from '../lib/types'
 
 function splitLeft(ms: number) {
@@ -147,7 +148,7 @@ export default function SessionPage() {
       {/* 운동 정보 */}
       <div className="mb-4">
         <div className="flex items-center gap-2">
-          {s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
+          {s.kind === 'tournament' ? <Badge tone="court">자체대회</Badge> : s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
           <span className={`text-[13px] font-bold ${phase === 'open' || phase === 'in_progress' ? 'text-court-600' : 'text-ink-soft'}`}>{PHASE_LABEL[phase]}</span>
         </div>
         <h1 className={`mt-1 text-[24px] font-bold leading-tight tracking-tight text-ink ${phase === 'canceled' ? 'line-through opacity-60' : ''}`}>{s.title}</h1>
@@ -166,6 +167,18 @@ export default function SessionPage() {
             대진판 열기
           </span>
           <IconChevronRight className="h-5 w-5 text-white/70" />
+        </Link>
+      )}
+
+      {s.kind === 'tournament' && s.tournament_state && phase !== 'canceled' && (isAdmin || s.tournament_state !== 'draft') && (
+        <Link to="tournament" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
+          <span className="min-w-0">
+            <span className="block font-semibold text-ink">{s.tournament_state === 'draft' ? '대진 짜기' : '대진표 보기'}</span>
+            <span className="block truncate text-sm text-ink-soft">
+              {STATE_LABEL[s.tournament_state]}, {s.round_count ?? 0}매치
+            </span>
+          </span>
+          <IconChevronRight className="h-5 w-5 shrink-0 text-ink-faint" />
         </Link>
       )}
 

@@ -47,6 +47,9 @@ export interface MemberWithProfile extends ClubMember {
 }
 
 export type SessionType = 'regular' | 'flash'
+export type SessionKind = 'normal' | 'tournament' | 'exchange'
+/** 대회 진행 단계. 일반 운동은 null */
+export type TournamentState = 'draft' | 'published' | 'in_progress' | 'finished'
 export type RegistrationStatus = 'confirmed' | 'waitlisted' | 'canceled'
 
 /** session_overview 뷰 한 행 */
@@ -69,6 +72,12 @@ export interface SessionOverview {
   guest_count: number
   my_registration_id: string | null
   my_status: RegistrationStatus | null
+  kind: SessionKind
+  tournament_state: TournamentState | null
+  round_count: number | null
+  score_target: number
+  score_cap: number | null
+  minutes_per_game: number
 }
 
 export interface SessionTemplate {

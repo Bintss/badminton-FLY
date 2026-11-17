@@ -50,6 +50,23 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_link: '링크는 https://로 시작해야 해요.',
   invalid_logo_path: '로고 파일 경로가 올바르지 않아요.',
   place_not_found: '장소를 찾을 수 없어요.',
+  tournament_locked: '지금 대회 단계에서는 바꿀 수 없어요. 새로고침해서 대회 상태를 확인해주세요.',
+  tournament_running: '대회가 진행 중이라 자율 경기를 만들 수 없어요. 대회가 끝나면 다시 만들 수 있어요.',
+  tournament_started: '이미 대회 경기가 시작돼서 확정을 취소할 수 없어요.',
+  not_tournament: '자체대회가 아닌 운동이에요.',
+  invalid_round_count: '매치 수는 1~20 사이로 정해주세요.',
+  invalid_score_rule: '점수 규칙을 확인해주세요. (목표 5~50점, 최대 점수는 목표 이상)',
+  invalid_minutes: '경기당 시간은 5~60분 사이로 정해주세요.',
+  rounds_in_use: '대진에 들어 있는 매치보다 매치 수를 줄일 수 없어요. 먼저 그 매치의 경기를 지워주세요.',
+  score_rule_locked: '점수가 입력된 뒤에는 점수 규칙을 바꿀 수 없어요.',
+  invalid_schedule: '대진 형식이 올바르지 않아요.',
+  invalid_round: '매치 번호가 매치 수를 넘었어요.',
+  duplicate_order: '같은 매치에 같은 순서의 경기가 두 개 있어요.',
+  duplicate_in_round: '한 사람이 같은 매치에 두 경기 들어 있어요.',
+  empty_schedule: '대진이 비어 있어요. 경기를 하나 이상 넣어주세요.',
+  schedule_stale: '대진에 참석을 취소한 사람이 있어요. 그 자리를 바꾸고 다시 저장해주세요.',
+  not_substitutable: '시작 전인 대회 경기만 선수를 바꿀 수 있어요.',
+  scheduled_order_locked: '대회 경기 순서는 대진표 순서를 따라요.',
 }
 
 /** RPC 에러를 사용자에게 보여줄 문장으로 바꾼다. */

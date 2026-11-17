@@ -16,6 +16,8 @@ import FlashNewPage from './pages/FlashNewPage'
 import MembersAdminPage from './pages/MembersAdminPage'
 import SessionPage from './pages/SessionPage'
 import TemplatesAdminPage from './pages/TemplatesAdminPage'
+import TournamentNewPage from './pages/TournamentNewPage'
+import TournamentPage from './pages/TournamentPage'
 
 function RequireAuth() {
   const { session, loading } = useAuth()
@@ -48,8 +50,10 @@ export default function App() {
               <Route path="about" element={<ClubAboutPage />} />
               <Route path="admin/club" element={<ClubEditPage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
+              <Route path="tournament/new" element={<TournamentNewPage />} />
               <Route path="s/:sessionId" element={<SessionPage />} />
               <Route path="s/:sessionId/board" element={<BoardPage />} />
+              <Route path="s/:sessionId/tournament" element={<TournamentPage />} />
               <Route path="admin/members" element={<MembersAdminPage />} />
               <Route path="admin/templates" element={<TemplatesAdminPage />} />
             </Route>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
+import { ConfirmButton } from '../components/ConfirmButton'
 import { Input } from '../components/form'
 import { IconChevronLeft, IconDown, IconSun, IconUndo, IconUp, IconX } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -8,6 +9,7 @@ import { Badge, Button, Empty, List, Page, SectionTitle, Skeleton } from '../com
 import { DEFAULT_TZ, formatTime, trimSeconds } from '../lib/datetime'
 import { useServerNow } from '../lib/serverTime'
 import { errorMessage, supabase } from '../lib/supabase'
+import { blockReason, teamsOf, tournamentActive, type PlayerState, type ScheduledMatch } from '../lib/tournament'
 import type { SessionOverview } from '../lib/types'
 
 /** 이 시간 이상 쉰 사람은 강조 (분) */
@@ -34,7 +36,10 @@ interface MatchRow {
   status: 'queued' | 'playing'
   started_at: string | null
   created_at: string
-  match_players: { registration_id: string }[]
+  phase: 'free' | 'scheduled'
+  round_no: number | null
+  order_no: number | null
+  match_players: { registration_id: string; team: 1 | 2 | null }[]
 }
 
 interface Player extends PlayerStat {
@@ -76,7 +81,7 @@ function useWakeLock(enabled: boolean) {
 
 export default function BoardPage() {
   const { sessionId } = useParams()
-  const { club } = useClub()
+  const { club, isAdmin } = useClub()
   const toast = useToast()
   const tz = club.timezone ?? DEFAULT_TZ
   const now = useServerNow(15_000)
@@ -96,14 +101,13 @@ export default function BoardPage() {
       supabase.from('session_player_stats').select('*').eq('session_id', sessionId),
       supabase
         .from('matches')
-        .select('id, court_no, queue_pos, status, started_at, created_at, match_players(registration_id)')
+        .select('id, court_no, queue_pos, status, started_at, created_at, phase, round_no, order_no, match_players(registration_id, team)')
         .eq('session_id', sessionId)
         .in('status', ['queued', 'playing']),
       supabase
         .from('registrations')
         .select('id, guest_name, profiles!registrations_user_id_fkey(display_name)')
-        .eq('session_id', sessionId)
-        .eq('status', 'confirmed'),
+        .eq('session_id', sessionId),
     ])
     const err = ov.error ?? st.error ?? ms.error ?? rs.error
     if (err) toast.error(errorMessage(err))
@@ -184,10 +188,16 @@ export default function BoardPage() {
   }, [stats, names, levels, now])
 
   const byId = useMemo(() => Object.fromEntries(players.map((p) => [p.registration_id, p])), [players])
-  const playing = matches.filter((m) => m.status === 'playing')
-  const queued = matches
-    .filter((m) => m.status === 'queued')
+  // 대회 모드: 대회 경기만 돌아간다. 확정 전 초안(운영진에게만 보임)은 대진판에 섞지 않는다
+  const tMode = tournamentActive(s)
+  const visible = matches.filter((m) => m.phase === 'free' || tMode)
+  const playing = visible.filter((m) => m.status === 'playing')
+  const queued = visible
+    .filter((m) => m.status === 'queued' && m.phase === 'free')
     .sort((a, b) => (a.queue_pos ?? 0) - (b.queue_pos ?? 0) || a.created_at.localeCompare(b.created_at))
+  const tQueued = visible
+    .filter((m) => m.status === 'queued' && m.phase === 'scheduled')
+    .sort((a, b) => (a.round_no ?? 0) - (b.round_no ?? 0) || (a.order_no ?? 0) - (b.order_no ?? 0))
 
   const back = (
     <Link to={s ? `/c/${club.id}/s/${s.id}` : `/c/${club.id}`} className="-ml-1 inline-flex items-center gap-0.5 text-sm font-medium text-ink-soft">
@@ -226,60 +236,41 @@ export default function BoardPage() {
         </span>
       </div>
       {s.canceled_at && <p className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">취소된 운동이에요.</p>}
+      {tMode && (
+        <Link to={`/c/${club.id}/s/${s.id}/tournament`} className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-court-50 px-3 py-2.5 text-sm text-court-700 active:bg-court-100">
+          <span>
+            <span className="font-bold">자체대회 진행 중.</span> 대진표 순서대로, 4명이 모두 도착한 경기부터 빈 코트에 들어가요.
+          </span>
+          <span className="shrink-0 font-semibold underline underline-offset-4">대진표</span>
+        </Link>
+      )}
       {!canOperate && !s.canceled_at && <p className="mb-3 rounded-xl bg-black/[0.04] px-3 py-2 text-sm text-ink-soft">참석 확정자와 운영진만 대진을 바꿀 수 있어요. 지금은 보기만 할 수 있어요.</p>}
 
       {/* 가로 화면(태블릿·가로 모드)에서는 왼쪽 코트·대기, 오른쪽 참석자 */}
       <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:gap-6">
         <div>
-          <Courts s={s} playing={playing} now={now} nameOf={nameOf} canOperate={operating} onChanged={load} />
-          <Queue queued={queued} nameOf={nameOf} canOperate={operating} onChanged={load} />
+          <Courts s={s} playing={playing} now={now} nameOf={nameOf} canOperate={operating} isAdmin={isAdmin} onChanged={load} />
+          {tMode ? (
+            <TournamentQueue
+              queued={tQueued}
+              nameOf={nameOf}
+              info={(id) => {
+                const p = byId[id]
+                return p
+                  ? { name: p.name, confirmed: true, arrived: p.restMin !== null, playingElsewhere: p.is_playing }
+                  : { name: names[id] ?? '?', confirmed: false, arrived: false, playingElsewhere: false }
+              }}
+              canCancel={operating && isAdmin}
+              tournamentLink={`/c/${club.id}/s/${s.id}/tournament`}
+              onChanged={load}
+            />
+          ) : (
+            <Queue queued={queued} nameOf={nameOf} canOperate={operating} onChanged={load} />
+          )}
         </div>
-        <Players sessionId={s.id} players={players} canOperate={operating} onChanged={load} />
+        <Players sessionId={s.id} players={players} canOperate={operating} selectable={operating && !tMode} tournament={tMode} onChanged={load} />
       </div>
     </Page>
-  )
-}
-
-/** 실수로 누르기 쉬운 버튼: 첫 탭은 확인 상태로, 3초 안에 다시 누르면 실행 */
-function ConfirmButton({
-  label,
-  confirmLabel,
-  onConfirm,
-  className = '',
-  armedClassName = 'bg-danger text-white',
-  disabled,
-  ariaLabel,
-}: {
-  label: React.ReactNode
-  confirmLabel: string
-  onConfirm: () => void
-  className?: string
-  armedClassName?: string
-  disabled?: boolean
-  ariaLabel?: string
-}) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const t = setTimeout(() => setArmed(false), 3000)
-    return () => clearTimeout(t)
-  }, [armed])
-  return (
-    <button
-      type="button"
-      aria-label={armed ? confirmLabel : ariaLabel}
-      disabled={disabled}
-      className={`inline-flex items-center justify-center rounded-xl font-semibold transition-colors disabled:opacity-40 ${armed ? armedClassName : className}`}
-      onClick={(e) => {
-        e.stopPropagation()
-        if (armed) {
-          setArmed(false)
-          onConfirm()
-        } else setArmed(true)
-      }}
-    >
-      {armed ? confirmLabel : label}
-    </button>
   )
 }
 
@@ -310,6 +301,7 @@ function Courts({
   now,
   nameOf,
   canOperate,
+  isAdmin,
   onChanged,
 }: {
   s: SessionOverview
@@ -317,6 +309,7 @@ function Courts({
   now: number
   nameOf: (id: string) => string
   canOperate: boolean
+  isAdmin: boolean
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -337,12 +330,17 @@ function Courts({
     <section className="grid gap-3 sm:grid-cols-2">
       {courts.map((no) => {
         const m = playing.find((x) => x.court_no === no)
-        const ids = m?.match_players.map((p) => p.registration_id) ?? []
+        const sides = m ? teamsOf(m.match_players) : [[], []]
         return (
           <div key={no}>
             <div className="mb-1.5 flex items-baseline justify-between px-1">
               <span className="text-[13px] font-bold text-ink-soft">
                 코트 <span className="score text-[18px] text-ink">{no}</span>
+                {m?.phase === 'scheduled' && (
+                  <span className="ml-2 font-semibold text-court-600">
+                    매치 {m.round_no} · {m.order_no}경기
+                  </span>
+                )}
               </span>
               {m?.started_at && (
                 <span className="score text-[17px] font-semibold text-ink-soft">{Math.max(0, Math.floor((now - Date.parse(m.started_at)) / 60000))}분</span>
@@ -353,7 +351,7 @@ function Courts({
               <CourtLines empty={!m} />
               {m ? (
                 <div className="absolute inset-0 grid grid-cols-2">
-                  {[ids.slice(0, 2), ids.slice(2, 4)].map((side, i) => (
+                  {sides.map((side, i) => (
                     <div key={i} className="flex flex-col items-center justify-center gap-2 px-3">
                       {side.map((id) => (
                         <span key={id} className="max-w-full truncate rounded-md bg-court-700/55 px-2 py-0.5 text-[16px] font-bold text-white">
@@ -371,13 +369,15 @@ function Courts({
             </div>
             {m && canOperate && (
               <div className="mt-2 flex gap-2">
-                <ConfirmButton
-                  label="취소"
-                  confirmLabel="경기 취소"
-                  className="h-11 border border-black/10 bg-white px-4 text-[15px] text-ink-soft"
-                  disabled={busy === m.id}
-                  onConfirm={() => void act(m, 'cancel_match')}
-                />
+                {(m.phase === 'free' || isAdmin) && (
+                  <ConfirmButton
+                    label="취소"
+                    confirmLabel="경기 취소"
+                    className="h-11 border border-black/10 bg-white px-4 text-[15px] text-ink-soft"
+                    disabled={busy === m.id}
+                    onConfirm={() => void act(m, 'cancel_match')}
+                  />
+                )}
                 <ConfirmButton
                   label="경기 종료"
                   confirmLabel="한 번 더 누르면 종료"
@@ -470,15 +470,102 @@ function Queue({
   )
 }
 
+/** 대회 모드 대기열: 대진표 순서. 못 들어가는 경기는 이유를 보여준다 */
+const TQUEUE_PREVIEW = 8
+function TournamentQueue({
+  queued,
+  nameOf,
+  info,
+  canCancel,
+  tournamentLink,
+  onChanged,
+}: {
+  queued: MatchRow[]
+  nameOf: (id: string) => string
+  info: (id: string) => PlayerState
+  canCancel: boolean
+  tournamentLink: string
+  onChanged: () => Promise<void>
+}) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [all, setAll] = useState(false)
+  const shown = all ? queued : queued.slice(0, TQUEUE_PREVIEW)
+
+  const cancel = async (m: MatchRow) => {
+    setBusy(true)
+    const { error } = await supabase.rpc('cancel_match', { p_match: m.id })
+    if (error) toast.error(errorMessage(error))
+    else toast.info(`매치 ${m.round_no} · ${m.order_no}경기를 취소했어요`)
+    await onChanged()
+    setBusy(false)
+  }
+
+  return (
+    <section>
+      <SectionTitle right={<Link to={tournamentLink} className="font-semibold text-court-600">대진표 전체</Link>}>
+        남은 대회 경기 <span className="score text-[17px]">{queued.length}</span>
+      </SectionTitle>
+      {queued.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-black/15 px-4 py-4 text-center text-sm text-ink-soft">
+          남은 대회 경기가 없어요. 진행 중인 경기가 끝나면 대회가 끝나요.
+        </p>
+      ) : (
+        <List>
+          {shown.map((m) => {
+            const [t1, t2] = teamsOf(m.match_players)
+            const reason = blockReason(m as unknown as ScheduledMatch, info)
+            return (
+              <div key={m.id} className="flex items-center gap-2 px-3 py-2.5">
+                <span className={`score w-9 shrink-0 text-center text-[17px] font-semibold ${reason ? 'text-ink-faint' : 'text-court-600'}`}>
+                  {m.round_no}-{m.order_no}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] leading-snug text-ink">
+                    {t1.map(nameOf).join(', ')} <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> {t2.map(nameOf).join(', ')}
+                  </p>
+                  <p className={`text-xs ${reason ? 'text-shuttle-800' : 'text-court-600'}`}>{reason ?? '코트가 비면 바로 들어가요'}</p>
+                </div>
+                {canCancel && (
+                  <ConfirmButton
+                    label={<IconX />}
+                    ariaLabel={`매치 ${m.round_no} ${m.order_no}경기 취소`}
+                    confirmLabel="취소"
+                    className="h-10 w-10 shrink-0 bg-black/[0.05] text-ink-soft"
+                    armedClassName="h-10 shrink-0 px-3 bg-danger text-white text-sm"
+                    disabled={busy}
+                    onConfirm={() => void cancel(m)}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </List>
+      )}
+      {queued.length > TQUEUE_PREVIEW && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 w-full rounded-xl py-2 text-sm font-semibold text-ink-soft active:bg-black/5">
+          {all ? '접기' : `${queued.length - TQUEUE_PREVIEW}경기 더 보기`}
+        </button>
+      )}
+    </section>
+  )
+}
+
 function Players({
   sessionId,
   players,
   canOperate,
+  selectable,
+  tournament,
   onChanged,
 }: {
   sessionId: string
   players: Player[]
+  /** 체크인·게스트 추가 */
   canOperate: boolean
+  /** 4명 골라 경기 만들기 (대회 중에는 꺼짐) */
+  selectable: boolean
+  tournament: boolean
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -488,7 +575,7 @@ function Players({
   const [busy, setBusy] = useState(false)
 
   // 선택한 사람이 명단에서 빠지면(참석 취소 등) 선택에서도 뺀다
-  const valid = selected.filter((id) => players.some((p) => p.registration_id === id))
+  const valid = selectable ? selected.filter((id) => players.some((p) => p.registration_id === id)) : []
   const busyPeople = valid.filter((id) => {
     const p = players.find((x) => x.registration_id === id)
     return p && (p.is_playing || p.queued_count > 0)
@@ -544,7 +631,11 @@ function Players({
   return (
     <section>
       <SectionTitle right={`도착 ${arrivedCount}/${players.length}`}>참석자</SectionTitle>
-      {canOperate && <p className="-mt-1 mb-2 text-xs text-ink-faint">게임 수가 적은 순서예요. 4명을 눌러 경기를 만들어요.</p>}
+      {canOperate && (
+        <p className="-mt-1 mb-2 text-xs text-ink-faint">
+          {tournament ? '대회 중에는 경기를 새로 만들지 않아요. 도착한 사람만 눌러주세요.' : '게임 수가 적은 순서예요. 4명을 눌러 경기를 만들어요.'}
+        </p>
+      )}
       {players.length === 0 ? (
         <Empty title="참석 확정자가 없어요" />
       ) : (
@@ -557,12 +648,12 @@ function Players({
             return (
               <div
                 key={p.registration_id}
-                role={canOperate ? 'button' : undefined}
-                aria-pressed={canOperate ? isSel : undefined}
-                tabIndex={canOperate ? 0 : undefined}
-                onClick={canOperate ? () => toggle(p.registration_id) : undefined}
-                onKeyDown={canOperate ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(p.registration_id)) : undefined}
-                className={`relative flex min-h-16 items-center gap-3 px-3 py-2.5 ${isSel ? 'bg-court-50' : longRest ? 'bg-shuttle-100/70' : ''} ${canOperate ? 'cursor-pointer select-none active:bg-floor' : ''}`}
+                role={selectable ? 'button' : undefined}
+                aria-pressed={selectable ? isSel : undefined}
+                tabIndex={selectable ? 0 : undefined}
+                onClick={selectable ? () => toggle(p.registration_id) : undefined}
+                onKeyDown={selectable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(p.registration_id)) : undefined}
+                className={`relative flex min-h-16 items-center gap-3 px-3 py-2.5 ${isSel ? 'bg-court-50' : longRest && !tournament ? 'bg-shuttle-100/70' : ''} ${selectable ? 'cursor-pointer select-none active:bg-floor' : ''}`}
               >
                 {isSel && <span className="absolute inset-y-0 left-0 w-1 bg-court-600" aria-hidden />}
                 <span className={`score w-9 shrink-0 text-center text-[28px] font-semibold leading-none ${arrived ? 'text-ink' : 'text-ink-faint'}`} aria-label={`${p.games}게임`}>
@@ -582,7 +673,9 @@ function Players({
                       : p.is_playing
                         ? '경기 중'
                         : p.queued_count > 0
-                          ? `대기 경기 ${p.queued_count}개에 있어요`
+                          ? tournament
+                            ? `대회 경기 ${p.queued_count}개 남음`
+                            : `대기 경기 ${p.queued_count}개에 있어요`
                           : `${p.restMin}분째 쉬는 중`}
                   </p>
                 </div>
@@ -631,7 +724,7 @@ function Players({
       )}
 
       {/* 선택 바: 하단 탭 바로 위에 붙는다 */}
-      {canOperate && valid.length > 0 && (
+      {selectable && valid.length > 0 && (
         <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-black/[0.08] bg-white/95 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur">
           <div className="mx-auto max-w-md px-4 py-3">
             <p className="mb-2 truncate text-sm text-ink">
