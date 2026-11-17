@@ -55,6 +55,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   tournament_started: '이미 대회 경기가 시작돼서 확정을 취소할 수 없어요.',
   not_tournament: '자체대회가 아닌 운동이에요.',
   invalid_gender: '성별은 남 또는 여로 골라주세요.',
+  invalid_level: '급수는 A조, B조, C조, D조, 초심 중에서 골라주세요.',
   invalid_round_count: '매치 수는 1~20 사이로 정해주세요.',
   invalid_score_rule: '점수 규칙을 확인해주세요. (목표 5~50점, 최대 점수는 목표 이상)',
   invalid_minutes: '경기당 시간은 5~60분 사이로 정해주세요.',

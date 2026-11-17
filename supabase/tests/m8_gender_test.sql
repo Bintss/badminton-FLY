@@ -76,3 +76,19 @@ select pg_temp.ok((select guest_gender = 'M' from registrations where id = :'g2'
 select pg_temp.fails(format($$select set_guest_gender(id, 'M') from registrations where session_id = '%s' and kind = 'member' limit 1$$, :'S'),
   'registration_not_found', '회원 신청은 게스트 성별 수정 대상 아님');
 reset role;
+
+-- ── 급수 선택 (20261117050000_level_choice) ─────────────────
+set role authenticated;
+select pg_temp.as_user(:'M');
+select set_my_level(:'club', 'B조');
+select pg_temp.ok((select level = 'B조' from club_members where club_id = :'club' and user_id = :'M'), '급수 목록에서 선택');
+select pg_temp.fails(format($$select set_my_level('%s', 'B')$$, :'club'), 'invalid_level', '목록에 없는 급수(오타) 거부');
+select set_my_level(:'club', '  ');
+select pg_temp.ok((select level is null from club_members where club_id = :'club' and user_id = :'M'), '급수 비우기');
+select pg_temp.fails(format($$select set_member_level('%s', '%s', 'A조')$$, :'club', :'A'), 'forbidden', '일반 회원은 남의 급수 수정 불가');
+select pg_temp.as_user(:'A');
+select set_member_level(:'club', :'M', '초심');
+select pg_temp.ok((select level = '초심' from club_members where club_id = :'club' and user_id = :'M'), '운영진이 회원 급수 수정');
+select pg_temp.fails(format($$select set_member_level('%s', '%s', 'E조')$$, :'club', :'M'), 'invalid_level', '운영진도 목록 밖 급수 불가');
+reset role;
+select pg_temp.fails($$update club_members set level = 'Z' where true$$, 'club_members_level_choice', 'DB 제약: 목록 밖 값 저장 불가');

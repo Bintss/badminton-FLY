@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input } from '../components/form'
 import { GenderToggle } from '../components/GenderToggle'
+import { LevelPicker } from '../components/LevelPicker'
 import { IconChevronRight } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, List, Page, SectionTitle } from '../components/ui'
@@ -14,7 +15,7 @@ export default function MePage() {
   const { club, me, isAdmin, reload } = useClub()
   const toast = useToast()
   const [name, setName] = useState(profile?.display_name ?? '')
-  const [level, setLevel] = useState(me.level ?? '')
+  const [level, setLevel] = useState<string | null>(me.level ?? null)
   const [gender, setGender] = useState(me.gender ?? null)
   const [busy, setBusy] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
@@ -29,7 +30,7 @@ export default function MePage() {
       .then(({ count }) => setPendingCount(count ?? 0))
   }, [club.id, isAdmin])
 
-  const dirty = name.trim() !== (profile?.display_name ?? '') || level.trim() !== (me.level ?? '') || gender !== (me.gender ?? null)
+  const dirty = name.trim() !== (profile?.display_name ?? '') || level !== (me.level ?? null) || gender !== (me.gender ?? null)
 
   const save = async (e: FormEvent) => {
     e.preventDefault()
@@ -54,8 +55,8 @@ export default function MePage() {
           <Field label="이름" hint="모든 동아리에서 같은 이름으로 보여요.">
             <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} />
           </Field>
-          <Field label={`급수 (${club.name})`} hint="자체대회 자동 대진에서 두 팀 실력을 맞출 때 써요. (A~D조, 초심)">
-            <Input value={level} onChange={(e) => setLevel(e.target.value)} maxLength={10} placeholder="예: D조, 초심" />
+          <Field label={`급수 (${club.name})`} asGroup hint="자체대회 자동 대진에서 두 팀 실력을 맞출 때 써요. 고른 걸 다시 누르면 비워져요.">
+            <LevelPicker value={level} onChange={setLevel} />
           </Field>
           <Field label="성별" asGroup hint="자체대회에서 혼복·남복·여복을 짤 때 써요.">
             <div>
