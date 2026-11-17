@@ -20,7 +20,8 @@ export default function MembersAdminPage() {
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('club_members')
-      .select('*, profiles(id, display_name)')
+      // club_members는 user_id·decided_by 두 곳에서 profiles를 참조하므로 관계를 지정해야 한다
+      .select('*, profiles!club_members_user_id_fkey(id, display_name)')
       .eq('club_id', club.id)
       .in('status', ['pending', 'approved'])
       .order('requested_at')
@@ -39,7 +40,21 @@ export default function MembersAdminPage() {
     </Link>
   )
   if (!isAdmin) return <Navigate to={`/c/${club.id}`} replace />
-  if (!members) return <Page title="회원 관리" back={back}><ListSkeleton rows={3} /></Page>
+  if (!members)
+    return (
+      <Page title="회원 관리" back={back}>
+        {error ? (
+          <div className="space-y-3">
+            <ErrorText>{error}</ErrorText>
+            <Button variant="secondary" onClick={() => void load()}>
+              다시 불러오기
+            </Button>
+          </div>
+        ) : (
+          <ListSkeleton rows={3} />
+        )}
+      </Page>
+    )
 
   const decide = async (userId: string, approve: boolean) => {
     setBusy(userId)
