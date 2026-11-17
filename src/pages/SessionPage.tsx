@@ -268,8 +268,6 @@ function ActionCard({
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
-  const [late, setLate] = useState(false)
-  const [lateTime, setLateTime] = useState(() => toTimeInput(Date.parse(s.starts_at) + 60 * 60 * 1000, tz))
   const [busy, setBusy] = useState(false)
   const [latency, setLatency] = useState<number | null>(null)
   const [confirmCancel, setConfirmCancel] = useState(false)
@@ -277,7 +275,7 @@ function ActionCard({
   const register = async () => {
     setBusy(true)
     const t0 = performance.now()
-    const { data, error } = await supabase.rpc('register', { p_session: s.id, p_late_eta: late ? lateTime : null })
+    const { data, error } = await supabase.rpc('register', { p_session: s.id, p_late_eta: null })
     const ms = Math.round(performance.now() - t0)
     setBusy(false)
     if (error) {
@@ -286,7 +284,7 @@ function ActionCard({
     }
     setLatency(ms)
     const row = (Array.isArray(data) ? data[0] : data) as { status: string; queue_position: number } | undefined
-    if (row) toast.success(row.status === 'confirmed' ? `참석 확정, ${row.queue_position}번째예요` : `대기 ${row.queue_position}번으로 신청했어요`)
+    if (row) toast.success(row.status === 'confirmed' ? `참석 확정, ${row.queue_position}번째예요. 늦게 오면 도착 시각을 남겨주세요` : `대기 ${row.queue_position}번으로 신청했어요`)
     await onChanged()
   }
 
@@ -308,7 +306,7 @@ function ActionCard({
     const { error } = await supabase.rpc('set_late_eta', { p_registration: myReg.id, p_late_eta: value })
     setBusy(false)
     if (error) toast.error(errorMessage(error))
-    else toast.success(value ? `늦참 ${value} 도착으로 저장했어요` : '늦참을 취소했어요')
+    else toast.success(value ? `${value} 도착 예정으로 남겼어요` : '늦참 표시를 지웠어요')
     await onChanged()
   }
 
@@ -335,26 +333,7 @@ function ActionCard({
 
         {phase !== 'ended' && (
           <>
-            <div className="mt-4 flex items-end gap-2">
-              <div className="flex-1">
-                <Field label="늦참 도착 예정">
-                  <Input
-                    type="time"
-                    defaultValue={myReg.late_eta ? trimSeconds(myReg.late_eta) : ''}
-                    key={myReg.late_eta ?? 'none'}
-                    onBlur={(e) => {
-                      const v = e.target.value || null
-                      if (v !== (myReg.late_eta ? trimSeconds(myReg.late_eta) : null)) void saveLate(v)
-                    }}
-                  />
-                </Field>
-              </div>
-              {myReg.late_eta && (
-                <Button variant="secondary" disabled={busy} onClick={() => void saveLate(null)}>
-                  늦참 취소
-                </Button>
-              )}
-            </div>
+            <LateEta s={s} tz={tz} value={myReg.late_eta ? trimSeconds(myReg.late_eta) : null} busy={busy} onSave={saveLate} />
 
             <div className="mt-4">
               {!confirmCancel ? (
@@ -395,21 +374,102 @@ function ActionCard({
         </div>
       )}
 
-      {!closed && (
-        <div className="mb-3 flex min-h-12 items-center gap-3">
-          <label className="flex items-center gap-2 text-[15px] font-medium text-ink">
-            <input type="checkbox" checked={late} onChange={(e) => setLate(e.target.checked)} className="h-5 w-5 accent-court-600" />
-            늦게 도착해요
-          </label>
-          {late && <Input type="time" value={lateTime} onChange={(e) => setLateTime(e.target.value)} className="mt-0 h-10 w-32" aria-label="도착 예정 시각" />}
-        </div>
-      )}
-
       <Button className="h-14 w-full text-[17px]" disabled={!canTry || busy} onClick={() => void register()}>
         {closed ? '신청 마감' : phase === 'before_open' ? '오픈 전' : busy ? '신청하는 중' : phase === 'full' ? '대기 신청' : '참석 신청'}
       </Button>
-      {phase === 'full' && <p className="mt-2 text-center text-xs text-ink-soft">정원이 찼어요. 대기로 신청하면 취소자가 생길 때 순서대로 확정돼요.</p>}
+      {phase === 'full' && <p className="mt-2 text-center text-xs text-ink-soft">정원이 찼어요. 취소자가 생기면 대기 순서대로 확정돼요.</p>}
+      {!closed && phase !== 'full' && <p className="mt-2 text-center text-xs text-ink-faint">늦게 오면 신청한 뒤에 도착 시각을 남길 수 있어요.</p>}
     </Card>
+  )
+}
+
+/** 신청 후 늦참 표시: 빠른 선택(30분·1시간·1시간 30분 늦게) 또는 직접 시각. 이미 있으면 바꾸기·지우기 */
+function LateEta({
+  s,
+  tz,
+  value,
+  busy,
+  onSave,
+}: {
+  s: SessionOverview
+  tz: string
+  value: string | null
+  busy: boolean
+  onSave: (v: string | null) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [custom, setCustom] = useState('')
+  const start = Date.parse(s.starts_at)
+  const end = Date.parse(s.ends_at)
+  const quick = [30, 60, 90]
+    .map((min) => ({ min, at: start + min * 60_000 }))
+    .filter((q) => q.at < end)
+    .map((q) => ({ label: q.min < 60 ? `${q.min}분` : q.min % 60 ? `${Math.floor(q.min / 60)}시간 ${q.min % 60}분` : `${q.min / 60}시간`, time: toTimeInput(q.at, tz) }))
+
+  const save = async (v: string | null) => {
+    await onSave(v)
+    setOpen(false)
+    setCustom('')
+  }
+
+  return (
+    <div className="mt-4 rounded-xl bg-white/70 p-3 ring-1 ring-black/[0.05]">
+      {value && !open ? (
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[13px] font-semibold text-ink-soft">늦참</p>
+            <p className="text-[17px] font-bold text-shuttle-800">
+              <span className="score text-[22px]">{value}</span> 도착 예정
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            <Button variant="secondary" className="h-10 px-3 text-sm" disabled={busy} onClick={() => setOpen(true)}>
+              바꾸기
+            </Button>
+            <Button variant="ghost" className="h-10 px-3 text-sm text-ink-soft" disabled={busy} onClick={() => void save(null)}>
+              지우기
+            </Button>
+          </div>
+        </div>
+      ) : !open ? (
+        <button type="button" onClick={() => setOpen(true)} className="flex w-full items-center justify-between text-left">
+          <span>
+            <span className="block text-[15px] font-semibold text-ink">늦게 도착하나요?</span>
+            <span className="block text-[13px] text-ink-soft">도착 시각을 남기면 대진 짤 때 참고해요</span>
+          </span>
+          <span className="shrink-0 rounded-lg bg-court-600 px-3 py-2 text-sm font-semibold text-white">늦참 표시</span>
+        </button>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between">
+            <p className="text-[15px] font-semibold text-ink">운동 시작보다 얼마나 늦어요?</p>
+            <button type="button" onClick={() => setOpen(false)} className="text-sm font-medium text-ink-soft">
+              닫기
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            {quick.map((q) => (
+              <button
+                key={q.time}
+                type="button"
+                disabled={busy}
+                onClick={() => void save(q.time)}
+                className={`flex h-14 flex-col items-center justify-center rounded-xl text-[14px] font-semibold disabled:opacity-40 ${value === q.time ? 'bg-court-600 text-white' : 'bg-floor text-ink active:bg-black/10'}`}
+              >
+                {q.label}
+                <span className={`score text-[13px] font-medium ${value === q.time ? 'text-white/80' : 'text-ink-faint'}`}>{q.time}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <Input type="time" value={custom} onChange={(e) => setCustom(e.target.value)} className="!mt-0 min-w-0 flex-1" aria-label="도착 예정 시각 직접 입력" />
+            <Button className="shrink-0" disabled={busy || !custom} onClick={() => void save(custom)}>
+              이 시각으로
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
