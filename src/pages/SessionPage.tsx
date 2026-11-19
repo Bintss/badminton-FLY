@@ -114,6 +114,31 @@ export default function SessionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchangeKey])
 
+  // 대회 진행 중: 내 다음 경기 (대진표 카드에 보여준다)
+  const myRegId = regs.find((r) => r.kind === 'member' && r.user_id === uid)?.id ?? null
+  const tState = s?.tournament_state ?? null
+  const [myNext, setMyNext] = useState<{ round_no: number; status: string; court_no: number | null } | null | undefined>(undefined)
+  useEffect(() => {
+    if (!sessionId || !myRegId || (tState !== 'published' && tState !== 'in_progress')) return
+    let alive = true
+    void supabase
+      .from('matches')
+      .select('round_no, order_no, status, court_no, match_players!inner(registration_id)')
+      .eq('session_id', sessionId)
+      .eq('phase', 'scheduled')
+      .in('status', ['queued', 'playing'])
+      .eq('match_players.registration_id', myRegId)
+      .order('round_no')
+      .order('order_no')
+      .limit(1)
+      .then(({ data }) => {
+        if (alive) setMyNext(((data ?? [])[0] as { round_no: number; status: string; court_no: number | null } | undefined) ?? null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [sessionId, myRegId, tState, regs])
+
   // 실시간 갱신. 오픈 순간 수십 건이 몰리므로 이벤트마다 바로 다시 읽지 않고 모아서 한 번 읽는다
   // (기기마다 0.8~1.5초 사이 무작위로 퍼뜨려 동시 재조회 폭주를 막는다)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -192,6 +217,19 @@ export default function SessionPage() {
   const boardOpen = phase !== 'canceled' && now >= Date.parse(s.starts_at) - 3 * 3600_000 && now < Date.parse(s.ends_at) + 3 * 3600_000
   // 대진판을 조작하는 사람(운영진·연 사람·참석 확정자)에게만 진한 버튼
   const boardMain = canManage || partnerAdmin || myReg?.status === 'confirmed'
+  // 대진표 카드. 대회 당일엔 코트 현황(대진판)과 같이 떠서 설명 줄로 둘을 구분한다
+  const tournamentLink =
+    s.kind !== 'normal' && !!s.tournament_state && phase !== 'canceled' && ((isAdmin && hostSide) || partnerAdmin || s.tournament_state !== 'draft')
+  const running = s.tournament_state === 'published' || s.tournament_state === 'in_progress'
+  const tournamentSub = !running
+    ? `${STATE_LABEL[s.tournament_state ?? 'draft']}, ${s.round_count ?? 0}매치`
+    : myReg && myNext
+      ? myNext.status === 'playing'
+        ? `지금 내 경기 중, 코트 ${myNext.court_no ?? ''}`.trim()
+        : `내 다음 경기 매치 ${myNext.round_no}`
+      : myReg && myNext === null
+        ? '내 경기는 다 끝났어요. 전체 매치·결과'
+        : '전체 매치·결과'
 
   return (
     <Page back={back}>
@@ -234,7 +272,14 @@ export default function SessionPage() {
           <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl bg-court-600 px-4 py-3.5 text-white active:bg-court-700">
             <span className="flex items-center gap-2 font-semibold">
               <IconCourt className="h-5 w-5" />
-              대진판 열기
+              {tournamentLink ? (
+                <span>
+                  <span className="block">코트 현황</span>
+                  <span className="block text-sm font-normal text-white/75">지금 경기 중·대기 경기</span>
+                </span>
+              ) : (
+                '대진판 열기'
+              )}
             </span>
             <IconChevronRight className="h-5 w-5 text-white/70" />
           </Link>
@@ -243,18 +288,25 @@ export default function SessionPage() {
           <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
             <span className="flex items-center gap-2 font-semibold text-ink">
               <IconCourt className="h-5 w-5 text-court-600" />
-              대진판 보기
+              {tournamentLink ? (
+                <span>
+                  <span className="block">코트 현황</span>
+                  <span className="block text-sm font-normal text-ink-soft">지금 경기 중·대기 경기</span>
+                </span>
+              ) : (
+                '대진판 보기'
+              )}
             </span>
             <IconChevronRight className="h-5 w-5 text-ink-faint" />
           </Link>
         ))}
 
-      {s.kind !== 'normal' && s.tournament_state && phase !== 'canceled' && ((isAdmin && hostSide) || partnerAdmin || s.tournament_state !== 'draft') && (
+      {tournamentLink && s.tournament_state && (
         <Link to="tournament" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
           <span className="min-w-0">
             <span className="block font-semibold text-ink">{s.tournament_state === 'draft' ? (isAdmin && hostSide ? '대진 짜기' : '참가자 명단') : '대진표 보기'}</span>
             <span className="block truncate text-sm text-ink-soft">
-              {STATE_LABEL[s.tournament_state]}, {s.round_count ?? 0}매치
+              {tournamentSub}
             </span>
           </span>
           <IconChevronRight className="h-5 w-5 shrink-0 text-ink-faint" />
