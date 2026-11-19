@@ -1,6 +1,6 @@
 {
-  "name": "FLY 배드민턴",
-  "short_name": "FLY",
+  "name": "배드민턴 모임",
+  "short_name": "배드민턴 모임",
   "description": "배드민턴 동아리 운동 투표와 현장 대진",
   "lang": "ko",
   "start_url": "./",
