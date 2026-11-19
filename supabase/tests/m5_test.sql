@@ -138,8 +138,8 @@ select cancel_registration(:'r5');
 select pg_temp.ok((select count(*) from session_player_stats where registration_id = :'r5') = 0, '참석 취소자는 대진 후보에서 제외');
 select pg_temp.fails(format($$select add_guest('%s', 'x')$$, :'S'), 'forbidden', '참석 취소하면 대진판 조작 권한도 없음');
 
--- ── 이력 ─────────────────────────────────────────────────────
-select pg_temp.as_user('00000000-0000-0000-0000-000000000502');
+-- ── 이력 (운영진만 읽음) ─────────────────────────────────────
+select pg_temp.as_user('00000000-0000-0000-0000-000000000501');
 select pg_temp.ok((select count(*) from activity_log where session_id = :'S' and action like 'board.%') >= 10, '대진판 변경 이력 기록');
 select pg_temp.fails(format($$select fill_courts('%s')$$, :'S'), 'permission denied', 'fill_courts는 RPC로 노출되지 않음');
 

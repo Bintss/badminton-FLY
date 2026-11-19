@@ -139,7 +139,7 @@ select pg_temp.ok((select capacity from sessions where id = :'S1') = 10, '정원
 select pg_temp.as_user(:'B');
 select pg_temp.ok(update_capacity(:'S5', 12) = 0, '번개 개설자는 자기 번개 정원 변경 가능');
 
--- ── 게스트는 정원 밖, 회원 누구나 취소 가능 ─────────────────────
+-- ── 게스트는 정원 밖, 데려온 사람이 취소 ───────────────────────
 reset role;
 insert into registrations (id, session_id, kind, guest_name, added_by, status)
 values ('30000000-0000-0000-0000-000000000001', :'S5', 'guest', '민수', :'B', 'confirmed');
@@ -148,10 +148,13 @@ set role authenticated;
 select pg_temp.as_user(:'C');
 select status as c5_status from register(:'S5') \gset
 select pg_temp.ok(:'c5_status' = 'confirmed', '게스트는 정원에 포함되지 않음 (정원 1인데 회원 확정)');
+select pg_temp.fails($$select cancel_registration('30000000-0000-0000-0000-000000000001')$$, 'forbidden', '남의 게스트는 (대진판 시간이 아니면) 취소 불가');
+select pg_temp.as_user(:'B');
 select cancel_registration('30000000-0000-0000-0000-000000000001');
-select pg_temp.ok((select status from registrations where id = '30000000-0000-0000-0000-000000000001') = 'canceled', '게스트는 회원 누구나 취소 가능');
+select pg_temp.ok((select status from registrations where id = '30000000-0000-0000-0000-000000000001') = 'canceled', '데려온 사람은 게스트 취소 가능');
 
 -- ── 이력 ─────────────────────────────────────────────────────
+select pg_temp.as_user(:'A');   -- 활동 기록은 운영진만 읽는다
 select pg_temp.ok((select count(*) from activity_log where session_id = :'S1' and action = 'registration.cancel') = 4, '취소 이력 4건');
 select pg_temp.ok((select count(*) from activity_log where session_id = :'S1' and action = 'session.capacity') = 2, '정원 변경 이력 2건');
 

@@ -256,7 +256,7 @@ export default function BoardPage() {
           <span className="shrink-0 font-semibold underline underline-offset-4">대진표</span>
         </Link>
       )}
-      {!canOperate && !s.canceled_at && <p className="mb-3 rounded-xl bg-black/[0.04] px-3 py-2 text-sm text-ink-soft">참석 확정자와 운영진만 대진을 바꿀 수 있어요. 지금은 보기만 할 수 있어요.</p>}
+      {!canOperate && !s.canceled_at && <p className="mb-3 rounded-xl bg-black/[0.04] px-3 py-2 text-sm text-ink-soft">대진은 운영진, 그리고 운동 시작 3시간 전부터 끝나고 3시간까지 참석 확정자가 바꿀 수 있어요. 지금은 보기만 할 수 있어요.</p>}
 
       {/* 가로 화면(태블릿·가로 모드)에서는 왼쪽 코트·대기, 오른쪽 참석자 */}
       <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:gap-6">
