@@ -5,6 +5,7 @@ import { useClub } from '../club/ClubLayout'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
 import { GenderToggle } from '../components/GenderToggle'
+import { LevelSelect, type Level } from '../components/LevelPicker'
 import { Input } from '../components/form'
 import { IconChevronLeft, IconDown, IconSun, IconUndo, IconUp, IconX } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -139,17 +140,23 @@ export default function BoardPage() {
   useEffect(() => {
     if (!sessionId) return
     supabase.rpc('can_operate_board', { p_session: sessionId }).then(({ data }) => setCanOperate(Boolean(data)))
-    supabase
-      .from('club_members')
-      .select('user_id, level')
-      .eq('club_id', club.id)
-      .eq('status', 'approved')
-      .then(({ data }) => {
-        const map: Record<string, string> = {}
-        for (const m of data ?? []) if (m.level) map[m.user_id as string] = m.level as string
-        setLevels(map)
-      })
-  }, [sessionId, club.id])
+  }, [sessionId])
+
+  // 급수: 회원·게스트·교류전 상대 회원 모두 (등록 단위). 명단이 바뀌면 다시 읽는다
+  const regKey = stats.map((p) => p.registration_id).sort().join(',')
+  useEffect(() => {
+    if (!sessionId || !regKey) return
+    let alive = true
+    void supabase.rpc('session_player_meta', { p_session: sessionId }).then(({ data }) => {
+      if (!alive) return
+      const map: Record<string, string> = {}
+      for (const m of (data as { registration_id: string; level: string | null }[] | null) ?? []) if (m.level) map[m.registration_id] = m.level
+      setLevels(map)
+    })
+    return () => {
+      alive = false
+    }
+  }, [sessionId, regKey])
 
   // 실시간: 다른 폰에서 바꾼 내용 반영 (짧게 모아서 한 번 다시 읽기)
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -186,7 +193,7 @@ export default function BoardPage() {
         return {
           ...p,
           name: names[p.registration_id] ?? p.guest_name ?? '이름 없음',
-          level: p.user_id ? levels[p.user_id] : undefined,
+          level: levels[p.registration_id],
           restMin: p.checked_in_at ? Math.max(0, Math.floor((now - since) / 60000)) : null,
         }
       })
@@ -636,6 +643,7 @@ function Players({
   const [warned, setWarned] = useState(false)
   const [guest, setGuest] = useState('')
   const [guestGender, setGuestGender] = useState<'M' | 'F' | null>(null)
+  const [guestLevel, setGuestLevel] = useState<Level | null>(null)
   const [busy, setBusy] = useState(false)
 
   // 선택한 사람이 명단에서 빠지면(참석 취소 등) 선택에서도 뺀다
@@ -682,13 +690,14 @@ function Players({
     e.preventDefault()
     if (!guest.trim()) return
     setBusy(true)
-    const { error } = await supabase.rpc('add_guest', { p_session: sessionId, p_name: guest.trim(), p_gender: guestGender })
+    const { error } = await supabase.rpc('add_guest', { p_session: sessionId, p_name: guest.trim(), p_gender: guestGender, p_level: guestLevel })
     setBusy(false)
     if (error) toast.error(errorMessage(error))
     else {
       toast.success(`게스트 ${guest.trim()}님을 추가했어요`)
       setGuest('')
       setGuestGender(null)
+      setGuestLevel(null)
     }
     await onChanged()
   }
@@ -780,14 +789,15 @@ function Players({
       </p>
 
       {canOperate && (
-        <form onSubmit={addGuest} className="mt-4 flex gap-2">
-          <Input value={guest} onChange={(e) => setGuest(e.target.value)} maxLength={30} placeholder="게스트 이름" className="mt-0 min-w-0 flex-1" aria-label="게스트 이름" />
-          <div className="flex items-center">
+        <form onSubmit={addGuest} className="mt-4 space-y-2">
+          <Input value={guest} onChange={(e) => setGuest(e.target.value)} maxLength={30} placeholder="게스트 이름" className="!mt-0" aria-label="게스트 이름" />
+          <div className="flex items-center gap-2">
             <GenderToggle compact value={guestGender} onChange={setGuestGender} label="게스트 성별" />
+            <LevelSelect value={guestLevel} onChange={setGuestLevel} label="게스트 급수" />
+            <Button type="submit" variant="secondary" disabled={busy || !guest.trim()} className="ml-auto">
+              게스트 추가
+            </Button>
           </div>
-          <Button type="submit" variant="secondary" disabled={busy || !guest.trim()}>
-            게스트 추가
-          </Button>
         </form>
       )}
 

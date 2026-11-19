@@ -111,7 +111,7 @@ export default function MePage() {
       <List>
         <MenuRow to={`/c/${club.id}/guide`} label="이용 가이드" sub="투표, 대진판, 자체대회, 알림" />
         <MenuRow to={`/c/${club.id}/about`} label="동아리 소개" sub="장소, 정기운동, 연락 링크" />
-        <MenuRow to="/clubs" label="동아리 전환" sub="아래 내 정보 탭을 두 번 눌러도 바로 바꿀 수 있어요" />
+        <MenuRow to="/clubs" label="동아리 전환" sub="내 정보 탭 두 번 눌러도 돼요" />
         <button className="flex w-full items-center justify-between px-4 py-4 text-left active:bg-floor" onClick={() => void signOut()}>
           <span className="font-medium text-danger">로그아웃</span>
         </button>

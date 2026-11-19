@@ -9,6 +9,7 @@ import { errorMessage, supabase } from '../lib/supabase'
 import { linkLabel } from '../lib/clubLogo'
 import { CLUB_COLUMNS, type Club, type ClubPlace, type ClubRequest, type MembershipWithClub } from '../lib/types'
 import { ClubLogo } from '../components/ClubLogo'
+import { particle } from '../lib/josa'
 
 const OTHERS_PREVIEW = 5
 const OTHERS_SEARCH_LIMIT = 20
@@ -216,7 +217,7 @@ export default function ClubsPage() {
         <ListSkeleton rows={2} />
       ) : others.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-black/15 px-4 py-4 text-center text-sm text-ink-soft">
-          {searching ? `'${query.trim()}'이(가) 들어간 동아리가 없어요` : '아직 다른 동아리가 없어요'}
+          {searching ? `'${query.trim()}'${particle(query.trim(), '이', '가')} 들어간 동아리가 없어요` : '아직 다른 동아리가 없어요'}
         </p>
       ) : (
         <>

@@ -10,6 +10,7 @@ import { LOGO_BUCKET, uploadClubLogo } from '../lib/clubLogo'
 import { setLastClubId } from '../lib/lastClub'
 import { errorMessage, supabase } from '../lib/supabase'
 import type { ClubPlace } from '../lib/types'
+import { josa, particle } from '../lib/josa'
 
 type PlaceDraft = { id: string | null; name: string; address: string; note: string }
 
@@ -112,7 +113,7 @@ export default function ClubEditPage() {
       toast.error(errorMessage(error))
       return
     }
-    toast.success(draft.id ? '장소를 수정했어요' : `${draft.name.trim()}을(를) 추가했어요`)
+    toast.success(draft.id ? '장소를 수정했어요' : `${josa(draft.name.trim(), '을', '를')} 추가했어요`)
     setDraft(null)
     await loadPlaces()
   }
@@ -122,7 +123,7 @@ export default function ClubEditPage() {
     const { error } = await supabase.rpc('delete_place', { p_place: p.id })
     setBusy(false)
     if (error) toast.error(errorMessage(error))
-    else toast.info(`${p.name}을(를) 지웠어요`)
+    else toast.info(`${josa(p.name, '을', '를')} 지웠어요`)
     setDraft(null)
     await loadPlaces()
   }
@@ -270,7 +271,7 @@ function DeleteClub({ clubId, clubName }: { clubId: string; clubName: string }) 
       return
     }
     setLastClubId(null)
-    toast.success(`${clubName}을(를) 삭제했어요`)
+    toast.success(`${josa(clubName, '을', '를')} 삭제했어요`)
     navigate('/clubs', { replace: true })
   }
 
@@ -286,7 +287,7 @@ function DeleteClub({ clubId, clubName }: { clubId: string; clubName: string }) 
         </Button>
       ) : (
         <div className="mt-3 space-y-3">
-          <Field label={`확인을 위해 동아리 이름 "${clubName}"을(를) 그대로 입력하세요`}>
+          <Field label={`확인을 위해 동아리 이름 "${clubName}"${particle(clubName, '을', '를')} 그대로 입력하세요`}>
             <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" />
           </Field>
           <div className="flex gap-2">

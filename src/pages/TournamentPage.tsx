@@ -346,9 +346,15 @@ function SettingsCard({ s, players, onChanged }: { s: SessionOverview; players: 
         <div className="min-w-0">
           <h2 className="text-[15px] font-bold text-ink">대회 설정</h2>
           <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">
-            {s.round_count}매치, {s.score_target}점{s.score_cap ? `(최대 ${s.score_cap}점)` : ''}, 경기당 {s.minutes_per_game}분. 참석 {players}명, 코트{' '}
-            {s.court_count}면이면 매치마다 {est.perRound}경기{est.restPerRound > 0 && `(${est.restPerRound}명 휴식)`}, 한 사람당 평균{' '}
-            {est.avgPerPlayer.toFixed(1)}게임, 약 {est.minutes}분이에요.
+            {s.round_count}매치, {s.score_target}점{s.score_cap ? `(최대 ${s.score_cap}점)` : ''}, 경기당 {s.minutes_per_game}분.{' '}
+            {players < 4 ? (
+              '참석자가 4명 이상 모이면 예상 경기 수와 시간을 보여드려요.'
+            ) : (
+              <>
+                참석 {players}명, 코트 {s.court_count}면이면 매치마다 {est.perRound}경기{est.restPerRound > 0 && `(${est.restPerRound}명 휴식)`}, 한 사람당
+                평균 {est.avgPerPlayer.toFixed(1)}게임, 약 {est.minutes}분이에요.
+              </>
+            )}
           </p>
         </div>
         <button type="button" onClick={() => setOpen((v) => !v)} className="h-9 shrink-0 rounded-lg px-3 text-sm font-semibold text-court-600 active:bg-court-50">
@@ -785,6 +791,18 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
         d.round === r &&
         ((notes[d.key]?.partnerRepeat ?? false) || notes[d.key]?.kind === 'invalid' || (draftPlayers(d).length > 0 && draftPlayers(d).length < 4)),
     )
+
+  // 참석자가 한 경기(4명)도 안 되면 편집기 대신 안내만
+  if (!hasAnyone && roster.confirmed.length < 4) {
+    return (
+      <>
+        <h2 className="mb-3 text-[18px] font-bold text-ink">대진 짜기</h2>
+        <Empty title={roster.confirmed.length === 0 ? '아직 참석자가 없어요' : `참석자가 ${roster.confirmed.length}명이에요`}>
+          참석 확정자가 4명 이상이면 대진을 짤 수 있어요.
+        </Empty>
+      </>
+    )
+  }
 
   return (
     <>

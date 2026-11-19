@@ -25,7 +25,8 @@ export default function BoardEntryPage() {
       const { data } = await supabase
         .from('session_overview')
         .select('*')
-        .eq('club_id', club.id)
+        // 교류전은 상대 동아리에서도 (수락된 것만)
+        .or(`club_id.eq.${club.id},and(partner_club_id.eq.${club.id},partner_status.eq.accepted)`)
         .is('canceled_at', null)
         .gt('ends_at', new Date(t - WINDOW_MS).toISOString())
         .order('starts_at')

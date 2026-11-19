@@ -10,6 +10,7 @@ import { LOGO_BUCKET } from '../lib/clubLogo'
 import { getLastClubId, setLastClubId } from '../lib/lastClub'
 import { errorMessage, supabase } from '../lib/supabase'
 import { CLUB_COLUMNS, type Club, type ClubRequest } from '../lib/types'
+import { josa } from '../lib/josa'
 
 const STATUS_LABEL: Record<ClubRequest['status'], string> = {
   pending: '대기',
@@ -70,7 +71,7 @@ export default function ClubRequestsAdminPage() {
       return
     }
     if (getLastClubId() === c.id) setLastClubId(null)
-    toast.success(`${c.name}을(를) 삭제했어요`)
+    toast.success(`${josa(c.name, '을', '를')} 삭제했어요`)
     setDeleting(null)
     setConfirm('')
     await load()

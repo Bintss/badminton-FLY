@@ -18,6 +18,7 @@ import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResu
 import { STATE_LABEL, tournamentActive } from '../lib/tournament'
 import type { Gender } from '../lib/autoDraft'
 import type { RegistrationRow, SessionOverview } from '../lib/types'
+import { josa } from '../lib/josa'
 
 function splitLeft(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000))
@@ -189,6 +190,8 @@ export default function SessionPage() {
     (s.kind === 'normal' || s.tournament_state === 'draft') &&
     (canManage || partnerAdmin ? phase !== 'canceled' && phase !== 'ended' : phase === 'open' || phase === 'full')
   const boardOpen = phase !== 'canceled' && now >= Date.parse(s.starts_at) - 3 * 3600_000 && now < Date.parse(s.ends_at) + 3 * 3600_000
+  // 대진판을 조작하는 사람(운영진·연 사람·참석 확정자)에게만 진한 버튼
+  const boardMain = canManage || partnerAdmin || myReg?.status === 'confirmed'
 
   return (
     <Page back={back}>
@@ -221,20 +224,30 @@ export default function SessionPage() {
       {exchange && hostSide && s.partner_status !== 'accepted' && phase !== 'canceled' && (
         <p className="mb-3 rounded-xl bg-shuttle-100 px-3 py-2.5 text-sm text-shuttle-800">
           {s.partner_status === 'declined'
-            ? `${nameOfClub(s.partner_club_id)}이(가) 초대를 거절했어요. 아래 운동 관리에서 취소할 수 있어요.`
+            ? `${josa(nameOfClub(s.partner_club_id), '이', '가')} 초대를 거절했어요. 아래 운동 관리에서 취소할 수 있어요.`
             : `${nameOfClub(s.partner_club_id)} 운영진의 수락을 기다리고 있어요. 수락하면 그 동아리 회원도 신청할 수 있어요.`}
         </p>
       )}
 
-      {boardOpen && (
-        <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl bg-court-600 px-4 py-3.5 text-white active:bg-court-700">
-          <span className="flex items-center gap-2 font-semibold">
-            <IconCourt className="h-5 w-5" />
-            대진판 열기
-          </span>
-          <IconChevronRight className="h-5 w-5 text-white/70" />
-        </Link>
-      )}
+      {boardOpen &&
+        (boardMain ? (
+          <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl bg-court-600 px-4 py-3.5 text-white active:bg-court-700">
+            <span className="flex items-center gap-2 font-semibold">
+              <IconCourt className="h-5 w-5" />
+              대진판 열기
+            </span>
+            <IconChevronRight className="h-5 w-5 text-white/70" />
+          </Link>
+        ) : (
+          // 아직 확정 안 된 사람에게는 신청 버튼이 먼저 보이게 흰 카드로
+          <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
+            <span className="flex items-center gap-2 font-semibold text-ink">
+              <IconCourt className="h-5 w-5 text-court-600" />
+              대진판 보기
+            </span>
+            <IconChevronRight className="h-5 w-5 text-ink-faint" />
+          </Link>
+        ))}
 
       {s.kind !== 'normal' && s.tournament_state && phase !== 'canceled' && ((isAdmin && hostSide) || partnerAdmin || s.tournament_state !== 'draft') && (
         <Link to="tournament" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
