@@ -13,6 +13,7 @@ import { supabase } from './lib/supabase'
 import BoardPage from './pages/BoardPage'
 import ClubHomePage from './pages/ClubHomePage'
 import ClubsPage from './pages/ClubsPage'
+import GuidePage from './pages/GuidePage'
 import ClubRequestsAdminPage from './pages/ClubRequestsAdminPage'
 import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
@@ -74,6 +75,7 @@ export default function App() {
               <Route path="me" element={<MePage />} />
               <Route path="board" element={<BoardEntryPage />} />
               <Route path="about" element={<ClubAboutPage />} />
+              <Route path="guide" element={<GuidePage />} />
               <Route path="admin/club" element={<ClubEditPage />} />
               <Route path="flash/new" element={<FlashNewPage />} />
               <Route path="tournament/new" element={<TournamentNewPage />} />

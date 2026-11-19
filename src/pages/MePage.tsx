@@ -109,6 +109,7 @@ export default function MePage() {
 
       <SectionTitle>계정</SectionTitle>
       <List>
+        <MenuRow to={`/c/${club.id}/guide`} label="이용 가이드" sub="투표, 대진판, 자체대회, 알림" />
         <MenuRow to={`/c/${club.id}/about`} label="동아리 소개" sub="장소, 정기운동, 연락 링크" />
         <MenuRow to="/clubs" label="동아리 전환" sub="다른 동아리 가입, 새 동아리 개설 신청" />
         <button className="flex w-full items-center justify-between px-4 py-4 text-left active:bg-floor" onClick={() => void signOut()}>
