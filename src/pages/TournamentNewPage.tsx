@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Segmented } from '../components/form'
 import { IconChevronLeft } from '../components/icons'
+import { GuestCapacityField } from '../components/GuestCapacityField'
 import { PlaceInput } from '../components/PlaceInput'
 import { ScoreCapField } from '../components/ScoreCapField'
 import { useToast } from '../components/toast'
@@ -26,6 +27,7 @@ export default function TournamentNewPage() {
   const [place, setPlace] = useState('')
   const [capacity, setCapacity] = useState(30)
   const [courts, setCourts] = useState(6)
+  const [guestsIn, setGuestsIn] = useState(false)
   const [openNow, setOpenNow] = useState(true)
   const [openDate, setOpenDate] = useState(() => toDateInput(serverNow(), tz))
   const [openTime, setOpenTime] = useState('21:00')
@@ -64,6 +66,7 @@ export default function TournamentNewPage() {
       p_score_target: n(target),
       p_score_cap: capOn ? n(cap) : null,
       p_minutes_per_game: n(minutes),
+      p_guests_in_capacity: guestsIn,
     })
     setBusy(false)
     if (error || !data) {
@@ -120,6 +123,7 @@ export default function TournamentNewPage() {
                 <Input type="number" min={1} max={30} value={courts} onChange={(e) => setCourts(Number(e.target.value))} required />
               </Field>
             </div>
+            <GuestCapacityField checked={guestsIn} onChange={setGuestsIn} />
             <div>
               <span className="text-[13px] font-semibold text-ink-soft">참석 투표 오픈</span>
               <Segmented

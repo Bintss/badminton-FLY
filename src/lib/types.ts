@@ -71,9 +71,12 @@ export interface SessionOverview {
   court_count: number
   opens_at: string
   canceled_at: string | null
+  /** 정원을 차지한 확정 인원 (게스트 정원 포함 설정이면 게스트도) */
   confirmed_count: number
   waitlist_count: number
+  /** 취소 안 한 게스트 전체 */
   guest_count: number
+  guests_in_capacity: boolean
   my_registration_id: string | null
   my_status: RegistrationStatus | null
   kind: SessionKind
@@ -97,6 +100,7 @@ export interface SessionTemplate {
   open_days_before: number
   open_time: string
   active: boolean
+  guests_in_capacity: boolean
 }
 
 /** registrations + 신청자 이름 */
@@ -112,5 +116,9 @@ export interface RegistrationRow {
   checked_in_at: string | null
   created_at: string
   promoted_at: string | null
+  added_by: string | null
+  guest_gender: 'M' | 'F' | null
   profiles: { display_name: string } | null
+  /** 게스트를 데려온 회원 */
+  adder?: { display_name: string } | null
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Select } from '../components/form'
+import { GuestCapacityField } from '../components/GuestCapacityField'
 import { PlaceInput } from '../components/PlaceInput'
 import { IconChevronLeft, IconPlus } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -24,6 +25,7 @@ const EMPTY: Draft = {
   open_days_before: 3,
   open_time: '21:00',
   active: true,
+  guests_in_capacity: false,
 }
 
 function openRuleText(t: Pick<SessionTemplate, 'weekday' | 'open_days_before' | 'open_time'>) {
@@ -77,6 +79,7 @@ export default function TemplatesAdminPage() {
       p_open_days_before: draft.open_days_before,
       p_open_time: draft.open_time,
       p_active: draft.active,
+      p_guests_in_capacity: draft.guests_in_capacity,
     })
     setBusy(false)
     if (error) {
@@ -158,6 +161,7 @@ export default function TemplatesAdminPage() {
               </Field>
             </div>
             <p className="rounded-lg bg-court-50 px-3 py-2 text-sm font-medium text-court-700">{openRuleText(draft)}</p>
+            <GuestCapacityField checked={draft.guests_in_capacity} onChange={(v) => set('guests_in_capacity', v)} />
             <label className="flex items-center gap-2 text-sm text-ink">
               <input type="checkbox" checked={draft.active} onChange={(e) => set('active', e.target.checked)} className="h-5 w-5 accent-court-600" />
               사용 (끄면 새 일정이 만들어지지 않아요)
@@ -188,7 +192,7 @@ export default function TemplatesAdminPage() {
                   매주 {WEEKDAYS[t.weekday]}요일 {trimSeconds(t.start_time)}~{trimSeconds(t.end_time)}
                 </p>
                 <p className="text-sm text-ink-soft">
-                  {t.place || '장소 미정'} · 정원 {t.capacity} · 코트 {t.court_count}면
+                  {t.place || '장소 미정'} · 정원 {t.capacity}{t.guests_in_capacity ? '(게스트 포함)' : ''} · 코트 {t.court_count}면
                 </p>
                 <p className="text-sm text-ink-soft">{openRuleText(t)}</p>
               </div>

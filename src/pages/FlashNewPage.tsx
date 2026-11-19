@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Segmented } from '../components/form'
+import { GuestCapacityField } from '../components/GuestCapacityField'
 import { PlaceInput } from '../components/PlaceInput'
 import { IconChevronLeft } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -23,6 +24,7 @@ export default function FlashNewPage() {
   const [place, setPlace] = useState('')
   const [capacity, setCapacity] = useState(12)
   const [courts, setCourts] = useState(2)
+  const [guestsIn, setGuestsIn] = useState(false)
   const [openNow, setOpenNow] = useState(true)
   const [openDate, setOpenDate] = useState(() => toDateInput(serverNow(), tz))
   const [openTime, setOpenTime] = useState('21:00')
@@ -49,6 +51,7 @@ export default function FlashNewPage() {
       p_capacity: capacity,
       p_court_count: courts,
       p_opens_at: opensAt,
+      p_guests_in_capacity: guestsIn,
     })
     setBusy(false)
     if (error || !data) {
@@ -96,6 +99,7 @@ export default function FlashNewPage() {
               <Input type="number" min={1} max={30} value={courts} onChange={(e) => setCourts(Number(e.target.value))} required />
             </Field>
           </div>
+          <GuestCapacityField checked={guestsIn} onChange={setGuestsIn} />
 
           <div>
             <span className="text-[13px] font-semibold text-ink-soft">투표 오픈</span>

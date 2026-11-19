@@ -41,6 +41,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   already_open: '이미 투표가 열려서 오픈 시각은 바꿀 수 없어요.',
   not_confirmed: '참석 확정된 사람만 체크인할 수 있어요.',
   invalid_name: '이름을 입력해주세요.',
+  guest_limit: '게스트는 한 사람당 3명까지 데려올 수 있어요.',
   need_four_players: '서로 다른 4명을 골라주세요.',
   invalid_players: '이 운동 참석자만 경기에 넣을 수 있어요.',
   match_not_found: '경기를 찾을 수 없어요.',

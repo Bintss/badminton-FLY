@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
+import { ConfirmButton } from '../components/ConfirmButton'
 import { Field, Input } from '../components/form'
+import { GenderMark, GenderToggle } from '../components/GenderToggle'
+import { GuestCapacityField } from '../components/GuestCapacityField'
 import { IconChevronLeft, IconChevronRight, IconCourt } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
@@ -12,6 +15,7 @@ import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStat
 import { errorMessage, supabase } from '../lib/supabase'
 import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
 import { STATE_LABEL, tournamentActive } from '../lib/tournament'
+import type { Gender } from '../lib/autoDraft'
 import type { RegistrationRow, SessionOverview } from '../lib/types'
 
 function splitLeft(ms: number) {
@@ -47,7 +51,9 @@ export default function SessionPage() {
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
         .from('registrations')
-        .select('id, session_id, kind, user_id, guest_name, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name)')
+        .select(
+          'id, session_id, kind, user_id, guest_name, guest_gender, added_by, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
+        )
         .eq('session_id', sessionId)
         .neq('status', 'canceled')
         .order('seq'),
@@ -114,7 +120,8 @@ export default function SessionPage() {
   const now = useCountdownNow(s ? Date.parse(s.opens_at) : 0)
 
   const confirmed = useMemo(() => regs.filter((r) => r.status === 'confirmed'), [regs])
-  const waitlist = useMemo(() => regs.filter((r) => r.kind === 'member' && r.status === 'waitlisted'), [regs])
+  // 대기에는 정원을 차지하는 사람만 들어온다 (게스트 정원 포함 설정이면 게스트도)
+  const waitlist = useMemo(() => regs.filter((r) => r.status === 'waitlisted'), [regs])
 
   const back = (
     <Link to={`/c/${club.id}`} className="-ml-1 inline-flex items-center gap-0.5 text-sm font-medium text-ink-soft">
@@ -142,10 +149,16 @@ export default function SessionPage() {
 
   const phase = sessionPhase(s, now)
   const canManage = isAdmin || (s.type === 'flash' && s.host_user_id === uid)
-  const memberConfirmed = confirmed.filter((r) => r.kind === 'member')
-  const guests = confirmed.length - memberConfirmed.length
+  // 정원을 차지한 확정자 (게스트 정원 포함 설정이면 게스트도). 정원 밖 게스트는 번호 없이 목록에만
+  const counted = confirmed.filter((r) => r.kind === 'member' || s.guests_in_capacity)
+  const guestCount = confirmed.filter((r) => r.kind === 'guest').length + waitlist.filter((r) => r.kind === 'guest').length
+  const orderOf = new Map(counted.map((r, i) => [r.id, i + 1]))
   const myReg = regs.find((r) => r.kind === 'member' && r.user_id === uid) ?? null
-  const myPosition = myReg ? (myReg.status === 'confirmed' ? memberConfirmed : waitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
+  const myPosition = myReg ? (myReg.status === 'confirmed' ? counted : waitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
+  // 게스트 추가: 회원은 투표가 열린 동안, 운영진·번개 개설자는 끝나기 전까지. 대진 공개된 대회는 명단 관리에서
+  const guestOpen =
+    (s.kind !== 'tournament' || s.tournament_state === 'draft') &&
+    (canManage ? phase !== 'canceled' && phase !== 'ended' : phase === 'open' || phase === 'full')
   const boardOpen = phase !== 'canceled' && now >= Date.parse(s.starts_at) - 3 * 3600_000 && now < Date.parse(s.ends_at) + 3 * 3600_000
 
   return (
@@ -189,17 +202,19 @@ export default function SessionPage() {
 
       <ActionCard s={s} phase={phase} now={now} tz={tz} myReg={myReg} myPosition={myPosition} onChanged={load} />
 
+      {guestOpen && uid && <GuestCard s={s} uid={uid} canManage={canManage} regs={regs} onChanged={load} />}
+
       {canManage && phase !== 'canceled' && phase !== 'ended' && <ManageCard s={s} now={now} tz={tz} onChanged={load} />}
 
-      <SectionTitle right={guests > 0 ? `게스트 ${guests}명` : undefined}>
-        참석 <span className="score text-[17px]">{memberConfirmed.length}/{s.capacity}</span>
+      <SectionTitle right={guestCount > 0 ? `게스트 ${guestCount}명 ${s.guests_in_capacity ? '포함' : '별도'}` : undefined}>
+        참석 <span className="score text-[17px]">{counted.length}/{s.capacity}</span>
       </SectionTitle>
       {confirmed.length === 0 ? (
         <Empty title="아직 신청한 사람이 없어요" />
       ) : (
         <List>
-          {confirmed.map((r, i) => (
-            <PersonRow key={r.id} index={i + 1} r={r} level={r.user_id ? levels[r.user_id] : undefined} me={r.user_id === uid} />
+          {confirmed.map((r) => (
+            <PersonRow key={r.id} index={orderOf.get(r.id) ?? null} r={r} level={r.user_id ? levels[r.user_id] : undefined} me={r.user_id === uid} />
           ))}
         </List>
       )}
@@ -220,19 +235,140 @@ export default function SessionPage() {
   )
 }
 
-function PersonRow({ index, r, level, me }: { index: number; r: RegistrationRow; level?: string; me: boolean }) {
+function PersonRow({ index, r, level, me }: { index: number | null; r: RegistrationRow; level?: string; me: boolean }) {
   const name = r.kind === 'guest' ? r.guest_name : r.profiles?.display_name
   return (
     <div className={`flex items-center justify-between gap-2 px-4 py-3 ${me ? 'bg-court-50' : ''}`}>
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="score w-6 shrink-0 text-right text-[17px] font-semibold text-ink-faint">{index}</span>
-        <span className="truncate font-medium text-ink">{name ?? '이름 없음'}</span>
-        {me && <Badge tone="court">나</Badge>}
-        {level && <Badge tone="outline">{level}</Badge>}
-        {r.kind === 'guest' && <Badge>게스트</Badge>}
+        <span className="score w-6 shrink-0 text-right text-[17px] font-semibold text-ink-faint">{index ?? ''}</span>
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium text-ink">{name ?? '이름 없음'}</span>
+            {me && <Badge tone="court">나</Badge>}
+            {level && <Badge tone="outline">{level}</Badge>}
+            {r.kind === 'guest' && <Badge>게스트</Badge>}
+          </span>
+          {r.kind === 'guest' && r.adder?.display_name && <span className="block truncate text-xs text-ink-faint">{r.adder.display_name}님 손님</span>}
+        </span>
       </div>
       {r.late_eta && <span className="shrink-0 text-sm font-medium text-shuttle-800">늦참 {trimSeconds(r.late_eta)}</span>}
     </div>
+  )
+}
+
+/** 게스트 데려오기: 이름·성별 넣고 추가, 내가 데려온 게스트(운영진은 전체) 취소 */
+function GuestCard({
+  s,
+  uid,
+  canManage,
+  regs,
+  onChanged,
+}: {
+  s: SessionOverview
+  uid: string
+  canManage: boolean
+  regs: RegistrationRow[]
+  onChanged: () => Promise<void>
+}) {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [gender, setGender] = useState<Gender | null>(null)
+  const [busy, setBusy] = useState(false)
+  const mine = regs.filter((r) => r.kind === 'guest' && (canManage || r.added_by === uid))
+  const myCount = regs.filter((r) => r.kind === 'guest' && r.added_by === uid).length
+  const limitReached = !canManage && myCount >= 3
+
+  const add = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setBusy(true)
+    const { data, error } = await supabase.rpc('add_vote_guest', { p_session: s.id, p_name: name.trim(), p_gender: gender })
+    setBusy(false)
+    if (error) {
+      toast.error(errorMessage(error))
+      return
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as { status: string; queue_position: number | null } | undefined
+    toast.success(
+      row?.status === 'waitlisted'
+        ? `정원이 차서 ${name.trim()}님은 대기 ${row.queue_position ?? ''}번이에요`
+        : `게스트 ${name.trim()}님을 넣었어요`,
+    )
+    setName('')
+    setGender(null)
+    await onChanged()
+  }
+
+  const remove = async (r: RegistrationRow) => {
+    setBusy(true)
+    const { error } = await supabase.rpc('cancel_registration', { p_registration: r.id })
+    setBusy(false)
+    if (error) toast.error(errorMessage(error))
+    else toast.info(`게스트 ${r.guest_name}님을 뺐어요`)
+    await onChanged()
+  }
+
+  return (
+    <Card className="mt-3">
+      <button className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="font-semibold text-ink">게스트 데려오기</span>
+        <span className="shrink-0 text-sm text-ink-faint">{open ? '접기' : mine.length > 0 ? `${canManage ? '게스트' : '내 게스트'} ${mine.length}명` : s.guests_in_capacity ? '정원에 포함' : '정원과 별도'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3 border-t border-black/[0.06] pt-3">
+          <p className="text-xs leading-relaxed text-ink-soft">
+            {s.guests_in_capacity
+              ? '이 운동은 게스트도 정원에 포함돼요. 정원이 차면 게스트도 대기로 들어가요.'
+              : '이 운동은 게스트가 정원과 상관없이 참석해요.'}
+            {!canManage && ' 한 사람당 3명까지예요.'}
+          </p>
+
+          {mine.length > 0 && (
+            <div className="mt-3 divide-y divide-black/[0.06] rounded-xl bg-floor">
+              {mine.map((r) => (
+                <div key={r.id} className="flex items-center gap-2 px-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[15px] font-medium text-ink">{r.guest_name}</span>
+                      {r.guest_gender && <GenderMark g={r.guest_gender} />}
+                      {r.status === 'waitlisted' && <Badge tone="shuttle">대기</Badge>}
+                    </span>
+                    {canManage && r.added_by !== uid && r.adder?.display_name && (
+                      <span className="block truncate text-xs text-ink-faint">{r.adder.display_name}님 손님</span>
+                    )}
+                  </span>
+                  <ConfirmButton
+                    label="빼기"
+                    ariaLabel={`게스트 ${r.guest_name} 빼기`}
+                    confirmLabel="빼기"
+                    className="h-9 shrink-0 bg-black/[0.05] px-3 text-sm text-ink-soft"
+                    armedClassName="h-9 shrink-0 bg-danger px-3 text-sm text-white"
+                    disabled={busy}
+                    onConfirm={() => void remove(r)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {limitReached ? (
+            <p className="mt-3 text-center text-sm text-ink-soft">게스트를 3명 모두 넣었어요.</p>
+          ) : (
+            <form onSubmit={add} className="mt-3 flex gap-2">
+              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} placeholder="게스트 이름" aria-label="게스트 이름" className="!mt-0 min-w-0 flex-1" />
+              <div className="flex items-center">
+                <GenderToggle compact value={gender} onChange={setGender} label="게스트 성별" />
+              </div>
+              <Button type="submit" variant="secondary" disabled={busy || !name.trim()}>
+                추가
+              </Button>
+            </form>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 
@@ -529,6 +665,17 @@ function ManageCard({ s, now, tz, onChanged }: { s: SessionOverview; now: number
     return true
   }
 
+  const toggleGuests = (on: boolean) =>
+    run(
+      () => supabase.rpc('set_guests_in_capacity', { p_session: s.id, p_on: on }),
+      (n) =>
+        on
+          ? '이제 게스트도 정원에 포함돼요. 이미 확정된 사람은 그대로예요'
+          : typeof n === 'number' && n > 0
+            ? `게스트를 정원에서 뺐어요. 대기하던 ${n}명이 확정됐어요`
+            : '게스트를 정원에서 뺐어요',
+    )
+
   const changeCapacity = () =>
     run(
       () => supabase.rpc('update_capacity', { p_session: s.id, p_capacity: capacity }),
@@ -560,7 +707,7 @@ function ManageCard({ s, now, tz, onChanged }: { s: SessionOverview; now: number
     <Card className="mt-3">
       <button className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="font-semibold text-ink">운동 관리</span>
-        <span className="text-sm text-ink-faint">{open ? '접기' : '정원, 일정 수정, 취소'}</span>
+        <span className="text-sm text-ink-faint">{open ? '접기' : '정원, 게스트, 일정 수정, 취소'}</span>
       </button>
 
       {open && (
@@ -574,6 +721,10 @@ function ManageCard({ s, now, tz, onChanged }: { s: SessionOverview; now: number
             <Button variant="secondary" className="mb-[22px]" disabled={busy || capacity === s.capacity} onClick={() => void changeCapacity()}>
               변경
             </Button>
+          </div>
+
+          <div className="mt-1">
+            <GuestCapacityField checked={s.guests_in_capacity} disabled={busy} onChange={(v) => void toggleGuests(v)} />
           </div>
 
           {!editing ? (
