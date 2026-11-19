@@ -251,7 +251,7 @@ export default function BoardPage() {
       {tMode && (
         <Link to={`/c/${club.id}/s/${s.id}/tournament`} className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-court-50 px-3 py-2.5 text-sm text-court-700 active:bg-court-100">
           <span>
-            <span className="font-bold">자체대회 진행 중.</span> 경기마다 코트가 정해져 있어요. 그 코트의 앞 경기가 끝나고 4명이 모두 오면 들어가요.
+            <span className="font-bold">{s.kind === 'exchange' ? '교류전' : '자체대회'} 진행 중.</span> 경기마다 코트가 정해져 있어요. 그 코트의 앞 경기가 끝나고 4명이 모두 오면 들어가요.
           </span>
           <span className="shrink-0 font-semibold underline underline-offset-4">대진표</span>
         </Link>

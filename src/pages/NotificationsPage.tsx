@@ -18,6 +18,8 @@ const KIND_LABEL: Record<string, string> = {
   club_request: '개설 신청',
   club_decided: '동아리 개설',
   club_deleted: '동아리 삭제',
+  exchange_invite: '교류전 초대',
+  exchange_reply: '교류전 응답',
 }
 
 function ago(iso: string) {

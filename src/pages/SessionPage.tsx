@@ -42,6 +42,9 @@ export default function SessionPage() {
   const [regs, setRegs] = useState<RegistrationRow[]>([])
   const [levels, setLevels] = useState<Record<string, string>>({})
   const [hostName, setHostName] = useState<string | null>(null)
+  // 교류전: 두 동아리 이름, 참석자 급수(상대 회원 것도)
+  const [clubNames, setClubNames] = useState<Record<string, string>>({})
+  const [metaLevels, setMetaLevels] = useState<Record<string, string>>({})
   const [loaded, setLoaded] = useState(false)
 
   const take = useLatest()
@@ -53,7 +56,7 @@ export default function SessionPage() {
       supabase
         .from('registrations')
         .select(
-          'id, session_id, kind, user_id, guest_name, guest_gender, guest_level, added_by, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
+          'id, session_id, kind, user_id, guest_name, guest_gender, guest_level, added_by, side_club_id, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
         )
         .eq('session_id', sessionId)
         .neq('status', 'canceled')
@@ -93,6 +96,22 @@ export default function SessionPage() {
       .maybeSingle()
       .then(({ data }) => setHostName((data?.display_name as string | undefined) ?? null))
   }, [s?.host_user_id, s?.type])
+
+  const exchangeKey = s?.kind === 'exchange' ? `${s.club_id}|${s.partner_club_id}|${regs.length}` : ''
+  useEffect(() => {
+    if (!exchangeKey || !s) return
+    void supabase
+      .from('clubs')
+      .select('id, name')
+      .in('id', [s.club_id, s.partner_club_id].filter(Boolean) as string[])
+      .then(({ data }) => setClubNames(Object.fromEntries(((data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]))))
+    void supabase.rpc('session_player_meta', { p_session: s.id }).then(({ data }) => {
+      const m: Record<string, string> = {}
+      for (const x of (data ?? []) as { registration_id: string; level: string | null }[]) if (x.level) m[x.registration_id] = x.level
+      setMetaLevels(m)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exchangeKey])
 
   // 실시간 갱신. 오픈 순간 수십 건이 몰리므로 이벤트마다 바로 다시 읽지 않고 모아서 한 번 읽는다
   // (기기마다 0.8~1.5초 사이 무작위로 퍼뜨려 동시 재조회 폭주를 막는다)
@@ -148,19 +167,27 @@ export default function SessionPage() {
     )
   }
 
-  const phase = sessionPhase(s, now)
-  const canManage = isAdmin || (s.type === 'flash' && s.host_user_id === uid)
+  const phase = sessionPhase(s, now, club.id)
+  const exchange = s.kind === 'exchange'
+  // 운동 관리(정원·일정·취소)는 주최 동아리 운영진과 연 사람만. 교류전 상대 운영진은 상대 정원만
+  const hostSide = s.club_id === club.id
+  const canManage = hostSide && (isAdmin || (s.type === 'flash' && s.host_user_id === uid))
+  const partnerAdmin = exchange && !hostSide && isAdmin
+  const sideOfReg = (r: RegistrationRow) => r.side_club_id ?? s.club_id
+  const mySide = exchange ? club.id : s.club_id
+  const nameOfClub = (id: string | null) => (id ? (clubNames[id] ?? (id === club.id ? club.name : '상대 동아리')) : '')
   // 정원을 차지한 확정자 (게스트 정원 포함 설정이면 게스트도). 정원 밖 게스트는 번호 없이 목록에만
-  const counted = confirmed.filter((r) => r.kind === 'member' || s.guests_in_capacity)
-  const guestCount = confirmed.filter((r) => r.kind === 'guest').length + waitlist.filter((r) => r.kind === 'guest').length
+  const counted = confirmed.filter((r) => (r.kind === 'member' || s.guests_in_capacity) && sideOfReg(r) === mySide)
   const orderOf = new Map(counted.map((r, i) => [r.id, i + 1]))
-  const levelOf = (r: RegistrationRow) => (r.kind === 'guest' ? (r.guest_level ?? undefined) : r.user_id ? levels[r.user_id] : undefined)
+  const levelOf = (r: RegistrationRow) =>
+    r.kind === 'guest' ? (r.guest_level ?? undefined) : exchange ? metaLevels[r.id] : r.user_id ? levels[r.user_id] : undefined
   const myReg = regs.find((r) => r.kind === 'member' && r.user_id === uid) ?? null
-  const myPosition = myReg ? (myReg.status === 'confirmed' ? counted : waitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
+  const myWaitlist = waitlist.filter((r) => sideOfReg(r) === mySide)
+  const myPosition = myReg ? (myReg.status === 'confirmed' ? counted : myWaitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
   // 게스트 추가: 회원은 투표가 열린 동안, 운영진·번개 개설자는 끝나기 전까지. 대진 공개된 대회는 명단 관리에서
   const guestOpen =
-    (s.kind !== 'tournament' || s.tournament_state === 'draft') &&
-    (canManage ? phase !== 'canceled' && phase !== 'ended' : phase === 'open' || phase === 'full')
+    (s.kind === 'normal' || s.tournament_state === 'draft') &&
+    (canManage || partnerAdmin ? phase !== 'canceled' && phase !== 'ended' : phase === 'open' || phase === 'full')
   const boardOpen = phase !== 'canceled' && now >= Date.parse(s.starts_at) - 3 * 3600_000 && now < Date.parse(s.ends_at) + 3 * 3600_000
 
   return (
@@ -168,7 +195,13 @@ export default function SessionPage() {
       {/* 운동 정보 */}
       <div className="mb-4">
         <div className="flex items-center gap-2">
-          {s.kind === 'tournament' ? <Badge tone="court">자체대회</Badge> : s.type === 'flash' && <Badge tone="shuttle">번개</Badge>}
+          {exchange ? (
+            <Badge tone="court">교류전</Badge>
+          ) : s.kind === 'tournament' ? (
+            <Badge tone="court">자체대회</Badge>
+          ) : (
+            s.type === 'flash' && <Badge tone="shuttle">번개</Badge>
+          )}
           <span className={`text-[13px] font-bold ${phase === 'open' || phase === 'in_progress' ? 'text-court-600' : 'text-ink-soft'}`}>{PHASE_LABEL[phase]}</span>
         </div>
         <h1 className={`mt-1 text-[24px] font-bold leading-tight tracking-tight text-ink ${phase === 'canceled' ? 'line-through opacity-60' : ''}`}>{s.title}</h1>
@@ -178,7 +211,20 @@ export default function SessionPage() {
         <p className="text-sm text-ink-soft">
           {s.place || '장소 미정'}, 코트 {s.court_count}면{hostName && `, ${hostName}님이 열었어요`}
         </p>
+        {exchange && s.partner_club_id && (
+          <p className="mt-1 text-[15px] font-semibold text-ink">
+            {nameOfClub(s.club_id)} <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> {nameOfClub(s.partner_club_id)}
+          </p>
+        )}
       </div>
+
+      {exchange && hostSide && s.partner_status !== 'accepted' && phase !== 'canceled' && (
+        <p className="mb-3 rounded-xl bg-shuttle-100 px-3 py-2.5 text-sm text-shuttle-800">
+          {s.partner_status === 'declined'
+            ? `${nameOfClub(s.partner_club_id)}이(가) 초대를 거절했어요. 아래 운동 관리에서 취소할 수 있어요.`
+            : `${nameOfClub(s.partner_club_id)} 운영진의 수락을 기다리고 있어요. 수락하면 그 동아리 회원도 신청할 수 있어요.`}
+        </p>
+      )}
 
       {boardOpen && (
         <Link to="board" className="mb-3 flex items-center justify-between rounded-2xl bg-court-600 px-4 py-3.5 text-white active:bg-court-700">
@@ -190,10 +236,10 @@ export default function SessionPage() {
         </Link>
       )}
 
-      {s.kind === 'tournament' && s.tournament_state && phase !== 'canceled' && (isAdmin || s.tournament_state !== 'draft') && (
+      {s.kind !== 'normal' && s.tournament_state && phase !== 'canceled' && ((isAdmin && hostSide) || partnerAdmin || s.tournament_state !== 'draft') && (
         <Link to="tournament" className="mb-3 flex items-center justify-between rounded-2xl border border-black/[0.06] bg-white px-4 py-3.5 active:bg-floor">
           <span className="min-w-0">
-            <span className="block font-semibold text-ink">{s.tournament_state === 'draft' ? '대진 짜기' : '대진표 보기'}</span>
+            <span className="block font-semibold text-ink">{s.tournament_state === 'draft' ? (isAdmin && hostSide ? '대진 짜기' : '참가자 명단') : '대진표 보기'}</span>
             <span className="block truncate text-sm text-ink-soft">
               {STATE_LABEL[s.tournament_state]}, {s.round_count ?? 0}매치
             </span>
@@ -204,36 +250,79 @@ export default function SessionPage() {
 
       <ActionCard s={s} phase={phase} now={now} tz={tz} myReg={myReg} myPosition={myPosition} onChanged={load} />
 
-      {guestOpen && uid && <GuestCard s={s} uid={uid} canManage={canManage} regs={regs} onChanged={load} />}
+      {guestOpen && uid && <GuestCard s={s} uid={uid} canManage={canManage || partnerAdmin} regs={regs} onChanged={load} />}
 
       {canManage && phase !== 'canceled' && phase !== 'ended' && <ManageCard s={s} now={now} tz={tz} onChanged={load} />}
-
-      <SectionTitle right={guestCount > 0 ? `게스트 ${guestCount}명 ${s.guests_in_capacity ? '포함' : '별도'}` : undefined}>
-        참석 <span className="score text-[17px]">{counted.length}/{s.capacity}</span>
-      </SectionTitle>
-      {confirmed.length === 0 ? (
-        <Empty title="아직 신청한 사람이 없어요" />
-      ) : (
-        <List>
-          {confirmed.map((r) => (
-            <PersonRow key={r.id} index={orderOf.get(r.id) ?? null} r={r} level={levelOf(r)} me={r.user_id === uid} />
-          ))}
-        </List>
+      {partnerAdmin && s.partner_status === 'accepted' && phase !== 'canceled' && phase !== 'ended' && (
+        <PartnerCapacityCard s={s} clubName={club.name} onChanged={load} />
       )}
 
-      {waitlist.length > 0 && (
-        <>
-          <SectionTitle right="취소자가 생기면 순서대로 확정">
-            대기 <span className="score text-[17px]">{waitlist.length}</span>
-          </SectionTitle>
-          <List>
-            {waitlist.map((r, i) => (
-              <PersonRow key={r.id} index={i + 1} r={r} level={levelOf(r)} me={r.user_id === uid} />
-            ))}
-          </List>
-        </>
-      )}
+      {(exchange && s.partner_club_id ? [mySide, mySide === s.club_id ? s.partner_club_id : s.club_id] : [s.club_id]).map((side) => {
+        const sideConfirmed = confirmed.filter((r) => sideOfReg(r) === side)
+        const sideWait = waitlist.filter((r) => sideOfReg(r) === side)
+        const sideCounted = sideConfirmed.filter((r) => r.kind === 'member' || s.guests_in_capacity)
+        const sideOrder = new Map(sideCounted.map((r, i) => [r.id, i + 1]))
+        const cap = side === s.partner_club_id && exchange ? (s.partner_capacity ?? 0) : s.capacity
+        const sideGuests = [...sideConfirmed, ...sideWait].filter((r) => r.kind === 'guest').length
+        return (
+          <div key={side}>
+            <SectionTitle right={sideGuests > 0 ? `게스트 ${sideGuests}명 ${s.guests_in_capacity ? '포함' : '별도'}` : undefined}>
+              {exchange ? nameOfClub(side) : '참석'} <span className="score text-[17px]">{sideCounted.length}/{cap}</span>
+            </SectionTitle>
+            {sideConfirmed.length === 0 ? (
+              <Empty title="아직 신청한 사람이 없어요" />
+            ) : (
+              <List>
+                {sideConfirmed.map((r) => (
+                  <PersonRow key={r.id} index={(exchange ? sideOrder : orderOf).get(r.id) ?? null} r={r} level={levelOf(r)} me={r.user_id === uid} />
+                ))}
+              </List>
+            )}
+            {sideWait.length > 0 && (
+              <>
+                <SectionTitle right="취소자가 생기면 순서대로 확정">
+                  {exchange ? `${nameOfClub(side)} 대기` : '대기'} <span className="score text-[17px]">{sideWait.length}</span>
+                </SectionTitle>
+                <List>
+                  {sideWait.map((r, i) => (
+                    <PersonRow key={r.id} index={i + 1} r={r} level={levelOf(r)} me={r.user_id === uid} />
+                  ))}
+                </List>
+              </>
+            )}
+          </div>
+        )
+      })}
     </Page>
+  )
+}
+
+/** 교류전 상대 동아리 운영진: 우리 편 정원 바꾸기 */
+function PartnerCapacityCard({ s, clubName, onChanged }: { s: SessionOverview; clubName: string; onChanged: () => Promise<void> }) {
+  const toast = useToast()
+  const [cap, setCap] = useState(s.partner_capacity ?? 1)
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    setBusy(true)
+    const { data, error } = await supabase.rpc('update_partner_capacity', { p_session: s.id, p_capacity: cap })
+    setBusy(false)
+    if (error) toast.error(errorMessage(error))
+    else toast.success(typeof data === 'number' && data > 0 ? `정원을 ${cap}명으로 바꿨어요. 대기자 ${data}명이 확정됐어요` : `정원을 ${cap}명으로 바꿨어요`)
+    await onChanged()
+  }
+  return (
+    <Card className="mt-3">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Field label={`${clubName} 정원`} hint="교류전에서 우리 동아리 자리 수예요. 일정·취소는 주최 동아리 운영진이 관리해요.">
+            <Input type="number" min={1} max={200} value={cap} onChange={(e) => setCap(Number(e.target.value))} />
+          </Field>
+        </div>
+        <Button variant="secondary" className="mb-[22px]" disabled={busy || cap === s.partner_capacity} onClick={() => void save()}>
+          변경
+        </Button>
+      </div>
+    </Card>
   )
 }
 

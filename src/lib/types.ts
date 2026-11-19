@@ -99,6 +99,12 @@ export interface SessionOverview {
   score_target: number
   score_cap: number | null
   minutes_per_game: number
+  /** 교류전 상대 동아리와 초대 상태, 상대 정원·인원 (일반 운동·자체대회는 null·0) */
+  partner_club_id: string | null
+  partner_status: 'invited' | 'accepted' | 'declined' | null
+  partner_capacity: number | null
+  partner_confirmed_count: number
+  partner_waitlist_count: number
 }
 
 export interface SessionTemplate {
@@ -131,6 +137,7 @@ export interface RegistrationRow {
   created_at: string
   promoted_at: string | null
   added_by: string | null
+  side_club_id?: string | null
   guest_gender: 'M' | 'F' | null
   guest_level: string | null
   profiles: { display_name: string } | null

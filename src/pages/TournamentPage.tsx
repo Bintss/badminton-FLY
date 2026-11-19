@@ -10,7 +10,7 @@ import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
 import { Sheet } from '../components/Sheet'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
-import { KIND_LABEL, autoDraft, draftNotes, gameKind, levelScore, type Gender, type GameKind } from '../lib/autoDraft'
+import { KIND_LABEL, autoDraft, autoDraftExchange, draftNotes, gameKind, levelScore, type Gender, type GameKind } from '../lib/autoDraft'
 import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { LevelPicker } from '../components/LevelPicker'
 import { errorMessage, supabase } from '../lib/supabase'
@@ -44,6 +44,7 @@ interface Reg {
   status: RegistrationStatus
   seq: number
   checked_in_at: string | null
+  side_club_id: string | null
   profiles: { display_name: string } | null
 }
 
@@ -59,6 +60,10 @@ interface Roster {
   /** 급수 글자로 정한 실력 점수 1~5 (게스트·모르는 급수 3) */
   scoreOf: (id: string) => number
   genderOf: (id: string) => Gender | null
+  /** 교류전 편 (일반 대회는 주최 동아리) */
+  sideOf: (id: string) => string
+  /** 동아리 이름 (교류전 편 표시) */
+  clubName: (clubId: string) => string
   /** 회원은 동아리 성별, 게스트는 신청의 성별을 바꾼다 (운영진) */
   setGender: (id: string, g: Gender | null) => Promise<void>
   isConfirmed: (id: string) => boolean
@@ -77,6 +82,9 @@ export default function TournamentPage() {
   const [levels, setLevels] = useState<Record<string, string>>({})
   const [genders, setGenders] = useState<Record<string, Gender>>({})
   const [members, setMembers] = useState<{ user_id: string; name: string }[]>([])
+  // 교류전: 상대 회원 급수·성별은 동아리 회원 표로는 안 보여서 서버에서 이 운동 참석자 것만 받는다
+  const [meta, setMeta] = useState<Record<string, { level: string | null; gender: Gender | null }>>({})
+  const [clubNames, setClubNames] = useState<Record<string, string>>({})
   const [loaded, setLoaded] = useState(false)
 
   const take = useLatest()
@@ -87,7 +95,7 @@ export default function TournamentPage() {
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase
         .from('registrations')
-        .select('id, kind, user_id, guest_name, guest_gender, guest_level, status, seq, checked_in_at, profiles!registrations_user_id_fkey(display_name)')
+        .select('id, kind, user_id, guest_name, guest_gender, guest_level, status, seq, checked_in_at, side_club_id, profiles!registrations_user_id_fkey(display_name)')
         .eq('session_id', sessionId)
         .order('seq'),
       // 대회 경기 전부 + (다른 코트에서 경기 중인지 알기 위해) 진행 중인 자율 경기
@@ -102,7 +110,19 @@ export default function TournamentPage() {
     if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     const err = ov.error ?? rs.error ?? ms.error
     if (err) toast.error(errorMessage(err))
-    setS((ov.data as SessionOverview | null) ?? null)
+    const ov2 = (ov.data as SessionOverview | null) ?? null
+    if (ov2?.kind === 'exchange') {
+      const [md, cn] = await Promise.all([
+        supabase.rpc('session_player_meta', { p_session: sessionId }),
+        supabase.from('clubs').select('id, name').in('id', [ov2.club_id, ov2.partner_club_id].filter(Boolean) as string[]),
+      ])
+      if (!take.isLatest(ticket)) return
+      const mm: Record<string, { level: string | null; gender: Gender | null }> = {}
+      for (const x of (md.data ?? []) as { registration_id: string; level: string | null; gender: Gender | null }[]) mm[x.registration_id] = x
+      setMeta(mm)
+      setClubNames(Object.fromEntries(((cn.data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name])))
+    }
+    setS(ov2)
     setRegs((rs.data as unknown as Reg[] | null) ?? [])
     setMatches((ms.data as unknown as MatchWithPhase[] | null) ?? [])
     setLoaded(true)
@@ -158,9 +178,15 @@ export default function TournamentPage() {
     }
   }, [sessionId, load])
 
+  const exchange = s?.kind === 'exchange'
+  const hostClubId = s?.club_id ?? club.id
   const roster: Roster = useMemo(() => {
     const byId = Object.fromEntries(regs.map((r) => [r.id, r]))
+    const memberLevel = (r: Reg | undefined) => (exchange ? (r ? meta[r.id]?.level : null) : r?.user_id ? levels[r.user_id] : null)
+    const memberGender = (r: Reg) => (exchange ? (meta[r.id]?.gender ?? null) : r.user_id ? (genders[r.user_id] ?? null) : null)
     return {
+      sideOf: (id) => byId[id]?.side_club_id ?? hostClubId,
+      clubName: (cid) => clubNames[cid] ?? (cid === club.id ? club.name : '상대'),
       confirmed: regs.filter((r) => r.status === 'confirmed'),
       nameOf: (id) => {
         const r = byId[id]
@@ -169,17 +195,17 @@ export default function TournamentPage() {
       levelOf: (id) => {
         const r = byId[id]
         if (!r) return undefined
-        return r.kind === 'guest' ? (r.guest_level ?? undefined) : r.user_id ? levels[r.user_id] : undefined
+        return r.kind === 'guest' ? (r.guest_level ?? undefined) : (memberLevel(r) ?? undefined)
       },
       isConfirmed: (id) => byId[id]?.status === 'confirmed',
       scoreOf: (id) => {
         const r = byId[id]
-        return levelScore(r?.kind === 'guest' ? r.guest_level : r?.user_id ? levels[r.user_id] : null)
+        return levelScore(r?.kind === 'guest' ? r.guest_level : memberLevel(r))
       },
       genderOf: (id) => {
         const r = byId[id]
         if (!r) return null
-        return r.kind === 'guest' ? r.guest_gender : r.user_id ? (genders[r.user_id] ?? null) : null
+        return r.kind === 'guest' ? r.guest_gender : memberGender(r)
       },
       setGender: async (id, g) => {
         const r = byId[id]
@@ -187,12 +213,12 @@ export default function TournamentPage() {
         const { error } =
           r.kind === 'guest'
             ? await supabase.rpc('set_guest_gender', { p_registration: id, p_gender: g })
-            : await supabase.rpc('set_member_gender', { p_club: club.id, p_user: r.user_id, p_gender: g })
+            : await supabase.rpc('set_member_gender', { p_club: r.side_club_id ?? hostClubId, p_user: r.user_id, p_gender: g })
         if (error) toast.error(errorMessage(error))
         await Promise.all([load(), loadMembers()])
       },
     }
-  }, [regs, levels, genders, club.id, toast, load, loadMembers])
+  }, [regs, levels, genders, meta, exchange, hostClubId, clubNames, club.id, club.name, toast, load, loadMembers])
 
   const scheduled = useMemo(() => matches.filter((m) => m.phase === 'scheduled'), [matches])
 
@@ -215,38 +241,54 @@ export default function TournamentPage() {
 
   const state = s.tournament_state
   const myRegId = regs.find((r) => r.kind === 'member' && r.user_id === uid && r.status !== 'canceled')?.id ?? null
-  const showSchedule = s.kind === 'tournament' && state && state !== 'draft'
+  const showSchedule = s.kind !== 'normal' && state && state !== 'draft'
+  // 교류전: 대진·설정은 주최 운영진만, 명단·점수는 상대 운영진도 (자기 편)
+  const hostAdmin = isAdmin && club.id === s.club_id
+  const partnerPending = s.kind === 'exchange' && s.partner_status !== 'accepted'
 
   return (
-    <Page back={back} wide={state === 'draft' && isAdmin}>
+    <Page back={back} wide={state === 'draft' && hostAdmin}>
       <div className="mb-4">
         <div className="flex items-center gap-2">
-          <Badge tone="court">자체대회</Badge>
+          <Badge tone="court">{s.kind === 'exchange' ? '교류전' : '자체대회'}</Badge>
           {state && <span className={`text-[13px] font-bold ${state === 'in_progress' ? 'text-court-600' : 'text-ink-soft'}`}>{STATE_LABEL[state]}</span>}
         </div>
         <h1 className="mt-1 text-[24px] font-bold leading-tight tracking-tight text-ink">{s.title}</h1>
+        {s.kind === 'exchange' && s.partner_club_id && (
+          <p className="mt-1 text-[15px] font-semibold text-ink-soft">
+            {roster.clubName(s.club_id)} <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> {roster.clubName(s.partner_club_id)}
+          </p>
+        )}
       </div>
 
       {s.canceled_at && <p className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">취소된 운동이에요.</p>}
 
-      {s.kind !== 'tournament' ? (
-        <Empty title="자체대회가 아닌 운동이에요">자체대회는 일정 화면의 자체대회 버튼으로 따로 만들어요.</Empty>
+      {s.kind === 'normal' ? (
+        <Empty title="대회가 아닌 운동이에요">자체대회·교류전은 일정 화면의 대회 버튼으로 따로 만들어요.</Empty>
       ) : (
-        !isAdmin && !showSchedule && <Empty title="아직 대진이 공개되지 않았어요">운영진이 대진을 확정하면 여기에 바로 보여요.</Empty>
+        !hostAdmin && !showSchedule && <Empty title="아직 대진이 공개되지 않았어요">주최 운영진이 대진을 확정하면 여기에 바로 보여요.</Empty>
       )}
 
-      {isAdmin && s.kind === 'tournament' && !s.canceled_at && <SettingsCard s={s} players={roster.confirmed.length} onChanged={load} />}
-
-      {isAdmin && s.kind === 'tournament' && !s.canceled_at && state !== 'finished' && (
-        <RosterCard s={s} regs={regs} roster={roster} members={members} onChanged={load} />
+      {hostAdmin && partnerPending && (
+        <p className="mb-4 rounded-xl bg-shuttle-100 px-3 py-2.5 text-sm text-shuttle-800">
+          {s.partner_status === 'declined'
+            ? '상대 동아리가 초대를 거절했어요. 이 교류전은 운동 화면에서 취소할 수 있어요.'
+            : '상대 동아리 운영진이 초대를 수락하면 상대 회원이 신청할 수 있어요. 대진은 수락 뒤에 공개할 수 있어요.'}
+        </p>
       )}
 
-      {isAdmin && s.kind === 'tournament' && state === 'draft' && !s.canceled_at && (
+      {hostAdmin && s.kind !== 'normal' && !s.canceled_at && <SettingsCard s={s} players={roster.confirmed.length} onChanged={load} />}
+
+      {isAdmin && s.kind !== 'normal' && !s.canceled_at && state !== 'finished' && !(s.kind === 'exchange' && !hostAdmin && partnerPending) && (
+        <RosterCard s={s} regs={regs} roster={roster} members={members} mySide={club.id} hostAdmin={hostAdmin} onChanged={load} />
+      )}
+
+      {hostAdmin && s.kind !== 'normal' && state === 'draft' && !s.canceled_at && (
         <ScheduleEditor s={s} roster={roster} matches={scheduled} onChanged={load} />
       )}
 
       {showSchedule && (
-        <ScheduleView s={s} roster={roster} regs={regs} matches={matches} myRegId={myRegId} isAdmin={isAdmin} onChanged={load} />
+        <ScheduleView s={s} roster={roster} regs={regs} matches={matches} myRegId={myRegId} isAdmin={hostAdmin} canScoreAll={isAdmin} onChanged={load} />
       )}
     </Page>
   )
@@ -345,15 +387,23 @@ function RosterCard({
   regs,
   roster,
   members,
+  mySide,
+  hostAdmin,
   onChanged,
 }: {
   s: SessionOverview
   regs: Reg[]
   roster: Roster
   members: { user_id: string; name: string }[]
+  /** 이 화면을 연 동아리 (교류전에서 내 편) */
+  mySide: string
+  hostAdmin: boolean
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
+  const exchange = s.kind === 'exchange'
+  /** 이 사람을 내가 관리할 수 있나: 주최 운영진은 모두, 상대 운영진은 자기 편만 */
+  const canManage = (r: Reg) => !exchange || hostAdmin || roster.sideOf(r.id) === mySide
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [picker, setPicker] = useState(false)
@@ -368,6 +418,8 @@ function RosterCard({
   const active = new Set(regs.filter((r) => r.kind === 'member' && r.status !== 'canceled').map((r) => r.user_id))
   const candidates = members.filter((m) => !active.has(m.user_id) && m.name.includes(query.trim()))
   const memberConfirmed = confirmed.filter((r) => r.kind === 'member').length
+  const sideCap = exchange && mySide === s.partner_club_id ? (s.partner_capacity ?? 0) : s.capacity
+  const sideUsed = exchange ? confirmed.filter((r) => roster.sideOf(r.id) === mySide && (r.kind === 'member' || s.guests_in_capacity)).length : memberConfirmed
 
   const call = async (fn: () => PromiseLike<{ data: unknown; error: unknown }>, ok: (data: unknown) => string) => {
     setBusy(true)
@@ -382,7 +434,7 @@ function RosterCard({
   const addMember = (userId: string, name: string, fromWait: boolean) =>
     call(
       () => supabase.rpc('roster_add_member', { p_session: s.id, p_user: userId }),
-      () => `${name}님을 ${fromWait ? '대기에서 ' : ''}참석 확정했어요${memberConfirmed >= s.capacity ? `. 정원을 ${memberConfirmed + 1}명으로 늘렸어요` : ''}`,
+      () => `${name}님을 ${fromWait ? '대기에서 ' : ''}참석 확정했어요${sideUsed >= sideCap ? `. 정원을 ${sideUsed + 1}명으로 늘렸어요` : ''}`,
     )
 
   const remove = (r: Reg) =>
@@ -412,8 +464,9 @@ function RosterCard({
         <span className="font-semibold">{roster.nameOf(r.id)}</span>
         {roster.levelOf(r.id) && <span className="ml-1 text-xs text-ink-faint">{roster.levelOf(r.id)}</span>}
         {r.kind === 'guest' && <span className="ml-1 text-xs font-medium text-ink-faint">게스트</span>}
+        {exchange && <span className="ml-1.5 rounded bg-black/[0.05] px-1 text-[11px] font-semibold text-ink-soft">{roster.clubName(roster.sideOf(r.id))}</span>}
       </span>
-      {action}
+      {canManage(r) ? action : null}
     </div>
   )
 
@@ -422,10 +475,25 @@ function RosterCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-[15px] font-bold text-ink">참가자 명단</h2>
-          <p className="mt-1 text-[13px] text-ink-soft">
-            확정 {memberConfirmed}/{s.capacity}명{confirmed.length > memberConfirmed && ` + 게스트 ${confirmed.length - memberConfirmed}명`}
-            {waitlisted.length > 0 && `, 대기 ${waitlisted.length}명`}
-          </p>
+          {exchange && s.partner_club_id ? (
+            <p className="mt-1 text-[13px] text-ink-soft">
+              {[s.club_id, s.partner_club_id].map((side, i) => {
+                const n = confirmed.filter((r) => roster.sideOf(r.id) === side).length
+                const w = waitlisted.filter((r) => roster.sideOf(r.id) === side).length
+                return (
+                  <span key={side}>
+                    {i > 0 && ', '}
+                    {roster.clubName(side)} {n}/{i === 0 ? s.capacity : s.partner_capacity}명{w > 0 && ` (대기 ${w})`}
+                  </span>
+                )
+              })}
+            </p>
+          ) : (
+            <p className="mt-1 text-[13px] text-ink-soft">
+              확정 {memberConfirmed}/{s.capacity}명{confirmed.length > memberConfirmed && ` + 게스트 ${confirmed.length - memberConfirmed}명`}
+              {waitlisted.length > 0 && `, 대기 ${waitlisted.length}명`}
+            </p>
+          )}
         </div>
         <button type="button" onClick={() => setOpen((v) => !v)} className="h-9 shrink-0 rounded-lg px-3 text-sm font-semibold text-court-600 active:bg-court-50">
           {open ? '닫기' : '명단 관리'}
@@ -471,9 +539,11 @@ function RosterCard({
                   row(
                     r,
                     <div className="flex shrink-0 gap-1.5">
-                      <Button className="h-9 px-3 text-sm" disabled={busy} onClick={() => void addMember(r.user_id!, roster.nameOf(r.id), true)}>
-                        확정
-                      </Button>
+                      {r.kind === 'member' && (
+                        <Button className="h-9 px-3 text-sm" disabled={busy} onClick={() => void addMember(r.user_id!, roster.nameOf(r.id), true)}>
+                          확정
+                        </Button>
+                      )}
                       <ConfirmButton
                         label="빼기"
                         confirmLabel="한 번 더"
@@ -563,7 +633,13 @@ function withEmptyRounds(drafts: DraftMatch[], rounds: number, perRound: number)
 function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview; roster: Roster; matches: ScheduledMatch[]; onChanged: () => Promise<void> }) {
   const toast = useToast()
   const rounds = s.round_count ?? 0
-  const perRound = Math.max(1, Math.min(s.court_count, Math.floor(roster.confirmed.length / 4)))
+  const exchange = s.kind === 'exchange'
+  const homeSide = s.club_id
+  const homeN = roster.confirmed.filter((p) => roster.sideOf(p.id) === homeSide).length
+  const awayN = roster.confirmed.length - homeN
+  const perRound = exchange
+    ? Math.max(1, Math.min(s.court_count, Math.floor(homeN / 2), Math.floor(awayN / 2)))
+    : Math.max(1, Math.min(s.court_count, Math.floor(roster.confirmed.length / 4)))
   const [drafts, setDrafts] = useState<DraftMatch[]>(() => withEmptyRounds(draftsFromMatches(matches), rounds, perRound))
   const [dirty, setDirty] = useState(false)
   const [round, setRound] = useState(1)
@@ -607,9 +683,18 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
       return
     }
     const players = roster.confirmed.map((p) => ({ id: p.id, score: roster.scoreOf(p.id), gender: roster.genderOf(p.id) }))
-    const next = autoDraft(players, rounds, s.court_count, Math.floor(Math.random() * 2 ** 31))
+    const seed = Math.floor(Math.random() * 2 ** 31)
+    const next = exchange
+      ? autoDraftExchange(
+          players.filter((p) => roster.sideOf(p.id) === homeSide),
+          players.filter((p) => roster.sideOf(p.id) !== homeSide),
+          rounds,
+          s.court_count,
+          seed,
+        )
+      : autoDraft(players, rounds, s.court_count, seed)
     if (next.length === 0) {
-      toast.error('참석자가 4명 이상이어야 대진을 짤 수 있어요')
+      toast.error(exchange ? '두 동아리 모두 2명 이상이어야 대진을 짤 수 있어요' : '참석자가 4명 이상이어야 대진을 짤 수 있어요')
       return
     }
     setSel(null)
@@ -633,12 +718,23 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
       return p.team === 1 ? { ...d, team1: team } : { ...d, team2: team }
     })
 
+  /** 교류전: 팀1 자리는 주최, 팀2 자리는 상대 동아리 사람만 */
+  const slotSide = (p: Extract<Pos, { kind: 'slot' }>) => (p.team === 1 ? homeSide : s.partner_club_id)
+  const fits = (id: string | null, p: Pos) => !exchange || !id || p.kind === 'bench' || roster.sideOf(id) === slotSide(p)
+
   /** 첫 탭은 고르기, 두 번째 탭은 두 자리 맞바꾸기. 쉬는 사람과 바꾸면 원래 있던 사람이 쉬는 사람이 된다 */
   const tap = (p: Pos) => {
     if (!sel) return setSel(p)
     if (samePos(sel, p)) return setSel(null)
     if (sel.kind === 'bench' && p.kind === 'bench') return setSel(p)
     const a = sel
+    const va = a.kind === 'bench' ? a.id : slotValue(drafts, a)
+    const vb = p.kind === 'bench' ? p.id : slotValue(drafts, p)
+    if (!fits(va, p) || !fits(vb, a)) {
+      toast.error('교류전은 같은 동아리 사람끼리만 바꿀 수 있어요. 왼쪽 팀은 주최, 오른쪽 팀은 상대 동아리예요')
+      setSel(null)
+      return
+    }
     setSel(null)
     update((ds) => {
       if (a.kind === 'slot' && p.kind === 'slot') {
@@ -712,6 +808,7 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
 
       {!hasAnyone && (
         <p className="mb-4 rounded-xl bg-floor px-3 py-3 text-[13px] leading-relaxed text-ink-soft">
+          {exchange && `교류전은 모든 경기가 ${roster.clubName(homeSide)} 2명 vs ${roster.clubName(s.partner_club_id ?? '')} 2명이에요. `}
           자동으로 짜기를 누르면 참석자 {roster.confirmed.length}명의 게임 수를 똑같이 맞추고, 같은 파트너를 피하고, 급수로 두 팀 실력을 맞춘 대진을
           만들어요. 성별이 있으면 모든 경기를 혼복·남복·여복 중 하나로, 한 사람이 같은 종목만 하지 않게 골고루 섞어요. 직접 짜려면 빈 자리를 누르고 아래
           쉬는 사람을 누르세요.
@@ -773,6 +870,15 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
         {sel ? `${selName} 선택됨. 바꿀 사람이나 자리를 누르세요` : '두 사람을 차례로 누르면 자리가 바뀌어요'}
       </p>
 
+      {exchange && s.partner_club_id && (
+        <div className="mb-1.5 grid grid-cols-[2rem_1fr_auto_1fr_2rem] items-center gap-1.5 px-2 text-xs font-bold text-ink-soft md:max-w-[calc(50%-0.25rem)]">
+          <span />
+          <span className="truncate">{roster.clubName(homeSide)}</span>
+          <span />
+          <span className="truncate">{roster.clubName(s.partner_club_id)}</span>
+          <span />
+        </div>
+      )}
       {/* 이 매치의 경기들 */}
       <div className="grid gap-2 md:grid-cols-2">
         {ds.map((d, i) => {
@@ -852,6 +958,11 @@ function ScheduleEditor({ s, roster, matches, onChanged }: { s: SessionOverview;
                 {!samePos(sel, pos) && <GenderMark g={roster.genderOf(p.id)} />}
                 {roster.nameOf(p.id)}
                 {roster.levelOf(p.id) && <span className={`text-xs font-medium ${samePos(sel, pos) ? 'text-white/75' : 'text-ink-faint'}`}>{roster.levelOf(p.id)}</span>}
+                {exchange && (
+                  <span className={`text-[11px] font-medium ${samePos(sel, pos) ? 'text-white/75' : 'text-ink-faint'}`}>
+                    {roster.sideOf(p.id) === homeSide ? '주최' : '상대'}
+                  </span>
+                )}
                 <span className={`score text-[14px] ${samePos(sel, pos) ? 'text-white/80' : 'text-ink-faint'}`}>{check.counts[p.id] ?? 0}</span>
                 {twice && <span className="ml-0.5 rounded bg-shuttle-100 px-1 text-[11px] text-shuttle-800">연속 휴식</span>}
               </button>
@@ -935,6 +1046,7 @@ function ScheduleView({
   matches,
   myRegId,
   isAdmin,
+  canScoreAll,
   onChanged,
 }: {
   s: SessionOverview
@@ -943,6 +1055,8 @@ function ScheduleView({
   matches: MatchWithPhase[]
   myRegId: string | null
   isAdmin: boolean
+  /** 점수는 상대 운영진도 고칠 수 있다 (교류전) */
+  canScoreAll: boolean
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -953,7 +1067,7 @@ function ScheduleView({
 
   /** 점수 넣을 수 있나: 운영진, 또는 그 경기 선수(대회 중이거나 아직 점수가 없을 때) — 서버 can_score_match와 같은 규칙 */
   const canScore = (m: ScheduledMatch) =>
-    isAdmin || (!!myRegId && m.match_players.some((p) => p.registration_id === myRegId) && (tournamentActive(s) || !m.result_at))
+    canScoreAll || (!!myRegId && m.match_players.some((p) => p.registration_id === myRegId) && (tournamentActive(s) || !m.result_at))
 
   const saveScore = async (m: ScheduledMatch, kind: ScoreKind, a: number | null, b: number | null): Promise<string | null> => {
     const { error } = await supabase.rpc('record_score', { p_match: m.id, p_score1: a, p_score2: b, p_kind: kind, p_expected: m.result_at })
@@ -1067,6 +1181,33 @@ function ScheduleView({
           </div>
         </Card>
       )}
+
+      {s.kind === 'exchange' && s.partner_club_id && (() => {
+        // 동아리별 승리 경기 수: 팀1 = 주최, 팀2 = 상대
+        const decided = scheduled.filter((m) => winnerOf(m) !== null)
+        const w1 = decided.filter((m) => winnerOf(m) === 1).length
+        const w2 = decided.length - w1
+        const left = scheduled.filter((m) => m.status === 'queued' || m.status === 'playing').length
+        return (
+          <Card className="mb-4">
+            <h2 className="text-[15px] font-bold text-ink">교류전 결과</h2>
+            <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-center">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-ink-soft">{roster.clubName(s.club_id)}</p>
+                <p className={`score text-[40px] font-semibold leading-none ${w1 > w2 ? 'text-court-600' : 'text-ink'}`}>{w1}</p>
+              </div>
+              <span className="text-sm font-bold text-ink-faint">:</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-ink-soft">{roster.clubName(s.partner_club_id)}</p>
+                <p className={`score text-[40px] font-semibold leading-none ${w2 > w1 ? 'text-court-600' : 'text-ink'}`}>{w2}</p>
+              </div>
+            </div>
+            <p className="mt-2 text-center text-xs text-ink-faint">
+              이긴 경기 수{left > 0 ? `, 남은 경기 ${left}개` : ''}{missing.length > 0 ? `, 점수 미입력 ${missing.length}개` : ''}
+            </p>
+          </Card>
+        )
+      })()}
 
       {s.tournament_state === 'finished' && (
         <p className="mb-4 rounded-xl bg-court-50 px-3 py-2.5 text-sm text-court-700">대회가 끝났어요. 대진판에서 다시 자유롭게 경기를 만들 수 있어요.</p>
@@ -1212,6 +1353,8 @@ function ScheduleView({
           <div className="divide-y divide-black/[0.06]">
             {roster.confirmed
               .filter((p) => !inSubRound.has(p.id))
+              // 교류전은 같은 편끼리만
+              .filter((p) => s.kind !== 'exchange' || roster.sideOf(p.id) === roster.sideOf(sub.out))
               // 추천 순: 대회 경기가 적은 사람, 그다음 빠지는 사람과 실력이 비슷한 사람
               .sort(
                 (a, b) =>
