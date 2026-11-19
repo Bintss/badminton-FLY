@@ -66,7 +66,10 @@ reset role;
 update sessions set starts_at = now() - interval '1 hour', ends_at = now() + interval '1 hour' where id = :'S2';   -- 이미 시작한 운동
 set role authenticated;
 
--- 권한
+-- 권한 (로컬 테스트 설정이 넣은 서비스 관리자 표시는 빼고 동아리 권한만 본다)
+reset role;
+delete from platform_admins where user_id::text like '90000000-0000-0000-0000-%';
+set role authenticated;
 select pg_temp.as_user(:'R');
 select pg_temp.fails(format($$select remove_member('%s', '%s', false)$$, :'club', :'B'), 'forbidden', '일반 회원은 내보내기 불가');
 select pg_temp.fails(format($$select delete_club('%s', '내보내기 테스트')$$, :'club'), 'forbidden', '일반 회원은 동아리 삭제 불가');

@@ -52,6 +52,9 @@ select pg_temp.fails(format($$select set_club_logo('%s', 'other-club/logo.png')$
 select pg_temp.fails(format($$select set_club_logo('%s', '%s/../x.png')$$, :'club', :'club'), 'invalid_logo_path', '경로 조작 거부');
 select set_club_logo(:'club', null);
 select pg_temp.ok((select logo_path is null from clubs where id = :'club'), '로고 해제');
+reset role;
+delete from platform_admins where user_id in (:'A', :'B');   -- 로컬 테스트 설정이 넣은 서비스 관리자 표시를 빼고 동아리 운영진 권한만 본다
+set role authenticated;
 select pg_temp.ok(is_admin_of_logo_path(:'club' || '/a.png'), 'Storage 정책: 운영진은 자기 동아리 폴더에 업로드 가능');
 select pg_temp.ok(not is_admin_of_logo_path('not-a-uuid/a.png'), 'Storage 정책: 형식 틀린 경로는 false (에러 아님)');
 select pg_temp.as_user(:'B');

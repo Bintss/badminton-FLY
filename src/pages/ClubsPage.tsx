@@ -203,7 +203,7 @@ export default function ClubsPage() {
           <List>
             <Link to="/admin/clubs" className="flex items-center gap-3 px-4 py-3.5 active:bg-floor">
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-ink">동아리 개설 신청</p>
+                <p className="font-semibold text-ink">개설 신청, 전체 동아리 관리</p>
                 <p className="text-sm text-ink-soft">{pendingCount > 0 ? `승인 기다리는 신청 ${pendingCount}건` : '기다리는 신청이 없어요'}</p>
               </div>
               {pendingCount > 0 && <Badge tone="shuttle">{pendingCount}</Badge>}

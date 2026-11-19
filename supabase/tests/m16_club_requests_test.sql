@@ -78,4 +78,16 @@ select pg_temp.ok((select body like '%거절됐어요. 이름이 너무 짧아�
 select request_club('토요 번개단 시즌2') as req3b \gset
 select cancel_club_request(:'req3b');
 select pg_temp.ok((select status from club_requests where id = :'req3b') = 'canceled', '거절 뒤 다시 신청, 내 신청 취소');
+
+-- ── 서비스 관리자의 동아리 삭제 ─────────────────────────────────
+select pg_temp.as_user(pg_temp.u(3));
+select pg_temp.fails(format('select delete_club(%L, %L)', :'club2', '수요 배드민턴'), 'forbidden', '일반 사용자는 남의 동아리 삭제 불가');
+select pg_temp.as_user(pg_temp.u(1));
+select pg_temp.fails(format('select delete_club(%L, %L)', :'club2', '수요'), 'confirm_name_mismatch', '이름이 다르면 삭제 안 됨');
+select delete_club(:'club2', '수요 배드민턴');
+select pg_temp.ok(not exists (select 1 from clubs where id = :'club2'), '회원이 아니어도 서비스 관리자는 삭제');
+select pg_temp.as_user(pg_temp.u(2));
+select pg_temp.ok((select body = '''수요 배드민턴'' 동아리가 서비스 관리자에 의해 삭제됐어요' and url = '/clubs'
+                     from notifications where kind = 'club_deleted'), '그 동아리 운영진에게 삭제 알림');
+select pg_temp.ok((select count(*) from notifications where kind = 'club_decided') = 0, '지운 동아리에 딸린 알림(개설 승인)은 함께 지워짐');
 reset role;
