@@ -10,12 +10,17 @@ import { linkLabel } from '../lib/clubLogo'
 import { CLUB_COLUMNS, type Club, type ClubPlace, type ClubRequest, type MembershipWithClub } from '../lib/types'
 import { ClubLogo } from '../components/ClubLogo'
 
+const OTHERS_PREVIEW = 5
+const OTHERS_SEARCH_LIMIT = 20
+
 export default function ClubsPage() {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
   const [memberships, setMemberships] = useState<MembershipWithClub[] | null>(null)
-  const [clubs, setClubs] = useState<Club[]>([])
+  const [others, setOthers] = useState<Club[] | null>(null)
+  const [othersTotal, setOthersTotal] = useState(0)
+  const [query, setQuery] = useState('')
   const [places, setPlaces] = useState<ClubPlace[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -29,14 +34,11 @@ export default function ClubsPage() {
 
   const load = useCallback(async () => {
     if (!uid) return
-    const [mine, all, pl, pa, req] = await Promise.all([
+    const [mine, pa, req] = await Promise.all([
       supabase.from('club_members').select('*, clubs(id, name, logo_path)').eq('user_id', uid).order('requested_at'),
-      supabase.from('clubs').select(CLUB_COLUMNS).order('name'),
-      supabase.from('club_places').select('*').order('sort'),
       supabase.rpc('is_platform_admin'),
       supabase.from('club_requests').select('*').eq('requested_by', uid).order('created_at', { ascending: false }).limit(1),
     ])
-    setPlaces((pl.data as ClubPlace[] | null) ?? [])
     const isPa = pa.data === true
     setPlatformAdmin(isPa)
     setMyRequest(((req.data as ClubRequest[] | null) ?? [])[0] ?? null)
@@ -44,17 +46,63 @@ export default function ClubsPage() {
       const { count } = await supabase.from('club_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending')
       setPendingCount(count ?? 0)
     }
-    if (mine.error || all.error) {
-      toast.error(errorMessage(mine.error ?? all.error))
+    if (mine.error) {
+      toast.error(errorMessage(mine.error))
       return
     }
     setMemberships(mine.data as MembershipWithClub[])
-    setClubs(all.data as Club[])
   }, [uid, toast])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  // 다른 동아리: 검색어가 없으면 이름순 5개만, 있으면 이름에 들어간 동아리 20개까지 (동아리가 많아져도 가볍게)
+  const mineKey = (memberships ?? [])
+    .filter((m) => m.status !== 'left')
+    .map((m) => m.club_id)
+    .sort()
+    .join(',')
+  useEffect(() => {
+    if (memberships === null) return
+    let stale = false
+    const q = query.trim().replace(/[%_,()*\\]/g, '')
+    const timer = setTimeout(async () => {
+      let req = supabase
+        .from('clubs')
+        .select(CLUB_COLUMNS, { count: 'exact' })
+        .order('name')
+        .limit(q ? OTHERS_SEARCH_LIMIT : OTHERS_PREVIEW)
+      if (mineKey) req = req.not('id', 'in', `(${mineKey})`)
+      if (q) req = req.ilike('name', `%${q}%`)
+      const { data, count, error } = await req
+      if (stale) return
+      if (error) {
+        toast.error(errorMessage(error))
+        return
+      }
+      const rows = (data as Club[] | null) ?? []
+      setOthers(rows)
+      setOthersTotal(count ?? rows.length)
+      if (rows.length === 0) {
+        setPlaces([])
+        return
+      }
+      const { data: pl } = await supabase
+        .from('club_places')
+        .select('*')
+        .in(
+          'club_id',
+          rows.map((c) => c.id),
+        )
+        .order('sort')
+      if (!stale) setPlaces((pl as ClubPlace[] | null) ?? [])
+    }, q ? 250 : 0)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [query, mineKey, memberships, toast])
 
   const requestJoin = async (clubId: string) => {
     setBusyId(clubId)
@@ -113,8 +161,7 @@ export default function ClubsPage() {
   if (!memberships) return <Page title="동아리" action={signOutButton}><ListSkeleton rows={2} /></Page>
 
   const visibleMine = memberships.filter((m) => m.status !== 'left')
-  const mineIds = new Set(visibleMine.map((m) => m.club_id))
-  const others = clubs.filter((c) => !mineIds.has(c.id))
+  const searching = query.trim().length > 0
 
   return (
     <Page title="동아리" action={signOutButton}>
@@ -156,9 +203,23 @@ export default function ClubsPage() {
         </List>
       )}
 
-      {others.length > 0 && (
+      <SectionTitle right={!searching && othersTotal > 0 ? `${othersTotal}개` : undefined}>다른 동아리</SectionTitle>
+      <Input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="동아리 이름으로 찾기"
+        aria-label="동아리 이름으로 찾기"
+        className="!mt-0 mb-2.5"
+      />
+      {others === null ? (
+        <ListSkeleton rows={2} />
+      ) : others.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-black/15 px-4 py-4 text-center text-sm text-ink-soft">
+          {searching ? `'${query.trim()}'이(가) 들어간 동아리가 없어요` : '아직 다른 동아리가 없어요'}
+        </p>
+      ) : (
         <>
-          <SectionTitle>다른 동아리</SectionTitle>
           <div className="space-y-2.5">
             {others.map((c) => {
               const open = expanded === c.id
@@ -194,6 +255,12 @@ export default function ClubsPage() {
               )
             })}
           </div>
+          {!searching && othersTotal > others.length && (
+            <p className="mt-2 text-center text-xs text-ink-faint">{othersTotal}개 중 {others.length}개만 보여요. 이름으로 찾아보세요.</p>
+          )}
+          {searching && othersTotal > others.length && (
+            <p className="mt-2 text-center text-xs text-ink-faint">{othersTotal}개 중 {others.length}개까지 보여요. 이름을 더 자세히 입력해 보세요.</p>
+          )}
         </>
       )}
 
