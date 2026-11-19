@@ -6,7 +6,7 @@
 --   * 안 넣음: 게스트는 늘 확정, 정원·대기 순번과 무관
 --   * 대진판(현장)·대회 명단에서 운영진이 넣는 게스트는 설정과 상관없이 확정 (현장 판단)
 --
---   add_vote_guest: 회원이 투표 화면에서 게스트를 데려온다
+--   add_vote_guest: 회원이 투표 화면에서 게스트를 데려온다 (이름·성별·급수, 성별·급수는 비워도 됨)
 --     회원은 투표가 열린 동안(오픈 ~ 시작), 운영진·번개 개설자는 끝나기 전까지
 --     회원 한 명이 한 운동에 데려올 수 있는 게스트는 3명까지 (운영진·개설자는 제한 없음)
 --     대진이 공개된 대회에는 넣을 수 없다 (명단 관리에서 운영진이)
@@ -603,7 +603,7 @@ $$;
 -- 투표 화면에서 게스트 데려오기
 --   반환: registration_id, status(confirmed|waitlisted), queue_position
 -- ---------------------------------------------------------------------
-create or replace function public.add_vote_guest(p_session uuid, p_name text, p_gender text default null)
+create or replace function public.add_vote_guest(p_session uuid, p_name text, p_gender text default null, p_level text default null)
 returns table (registration_id uuid, status public.registration_status, queue_position int)
 language plpgsql security definer set search_path = ''
 as $$
@@ -622,6 +622,9 @@ begin
   end if;
   if p_gender is not null and p_gender not in ('M', 'F') then
     raise exception 'invalid_gender' using errcode = '22023';
+  end if;
+  if p_level is not null and p_level not in ('A조', 'B조', 'C조', 'D조', '초심') then
+    raise exception 'invalid_level' using errcode = '22023';
   end if;
 
   select * into s from public.sessions where id = p_session for update;
@@ -660,8 +663,8 @@ begin
                    then 'confirmed'::public.registration_status
                    else 'waitlisted'::public.registration_status end;
 
-  insert into public.registrations (session_id, kind, guest_name, guest_gender, added_by, status)
-  values (p_session, 'guest', left(btrim(p_name), 30), p_gender, v_uid, v_status)
+  insert into public.registrations (session_id, kind, guest_name, guest_gender, guest_level, added_by, status)
+  values (p_session, 'guest', left(btrim(p_name), 30), p_gender, p_level, v_uid, v_status)
   returning id into v_id;
 
   perform public.log_activity(s.club_id, p_session, 'registration.add_guest',
@@ -719,9 +722,9 @@ revoke execute on function public.save_template(uuid, uuid, text, smallint, time
 revoke execute on function public.create_flash(uuid, text, text, timestamptz, timestamptz, int, int, timestamptz, boolean) from public, anon, authenticated;
 revoke execute on function public.create_tournament(uuid, text, text, timestamptz, timestamptz, int, int, timestamptz, int, int, int, int, boolean) from public, anon, authenticated;
 revoke execute on function public.set_guests_in_capacity(uuid, boolean)     from public, anon, authenticated;
-revoke execute on function public.add_vote_guest(uuid, text, text)          from public, anon, authenticated;
+revoke execute on function public.add_vote_guest(uuid, text, text, text)          from public, anon, authenticated;
 grant execute on function public.save_template(uuid, uuid, text, smallint, time, time, text, int, int, int, time, boolean, boolean) to authenticated;
 grant execute on function public.create_flash(uuid, text, text, timestamptz, timestamptz, int, int, timestamptz, boolean) to authenticated;
 grant execute on function public.create_tournament(uuid, text, text, timestamptz, timestamptz, int, int, timestamptz, int, int, int, int, boolean) to authenticated;
 grant execute on function public.set_guests_in_capacity(uuid, boolean)      to authenticated;
-grant execute on function public.add_vote_guest(uuid, text, text)           to authenticated;
+grant execute on function public.add_vote_guest(uuid, text, text, text)           to authenticated;

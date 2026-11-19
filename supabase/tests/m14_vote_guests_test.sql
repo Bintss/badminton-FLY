@@ -58,10 +58,10 @@ set role authenticated;
 select pg_temp.as_user(pg_temp.u(2)); select register(:OFF);
 select pg_temp.as_user(pg_temp.u(3)); select register(:OFF);
 select pg_temp.as_user(pg_temp.u(2));
-select registration_id as g_off, status as g_off_status from add_vote_guest(:OFF, '  친구A ', 'M') \gset
+select registration_id as g_off, status as g_off_status from add_vote_guest(:OFF, '  친구A ', 'M', 'B조') \gset
 select pg_temp.ok(:'g_off_status' = 'confirmed', '정원이 찼어도 게스트는 확정 (정원 밖)');
-select pg_temp.ok((select guest_name = '친구A' and guest_gender = 'M' and added_by = pg_temp.u(2) and checked_in_at is null
-                     from registrations where id = :'g_off'), '이름 다듬기, 데려온 사람 기록, 아직 도착 전');
+select pg_temp.ok((select guest_name = '친구A' and guest_gender = 'M' and guest_level = 'B조' and added_by = pg_temp.u(2) and checked_in_at is null
+                     from registrations where id = :'g_off'), '이름 다듬기, 성별·급수, 데려온 사람 기록, 아직 도착 전');
 select pg_temp.ok((select confirmed_count = 2 and guest_count = 1 and not guests_in_capacity from session_overview where id = :OFF),
   '확정 인원은 회원만, 게스트 수는 따로');
 select pg_temp.as_user(pg_temp.u(4));
@@ -72,6 +72,7 @@ select add_vote_guest(:OFF, '친구C', 'F');
 select pg_temp.fails($$select add_vote_guest('e1400000-0000-0000-0000-0000000000a1', '친구D', null)$$, 'guest_limit', '회원 한 명당 게스트 3명까지');
 select pg_temp.fails($$select add_vote_guest('e1400000-0000-0000-0000-0000000000a1', '   ', null)$$, 'invalid_name', '빈 이름 거부');
 select pg_temp.fails($$select add_vote_guest('e1400000-0000-0000-0000-0000000000a1', '친구', 'X')$$, 'invalid_gender', '성별 값 확인');
+select pg_temp.fails($$select add_vote_guest('e1400000-0000-0000-0000-0000000000a1', '친구', null, 'E조')$$, 'invalid_level', '급수는 목록에 있는 것만');
 
 -- 취소 권한: 데려온 사람·운영진·참석 확정자(대진판)만
 select pg_temp.as_user(pg_temp.u(5));

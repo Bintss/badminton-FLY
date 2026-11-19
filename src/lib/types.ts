@@ -118,6 +118,7 @@ export interface RegistrationRow {
   promoted_at: string | null
   added_by: string | null
   guest_gender: 'M' | 'F' | null
+  guest_level: string | null
   profiles: { display_name: string } | null
   /** 게스트를 데려온 회원 */
   adder?: { display_name: string } | null

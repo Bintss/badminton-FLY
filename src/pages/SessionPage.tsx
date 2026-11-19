@@ -6,6 +6,7 @@ import { ConfirmButton } from '../components/ConfirmButton'
 import { Field, Input } from '../components/form'
 import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { GuestCapacityField } from '../components/GuestCapacityField'
+import { LevelSelect, type Level } from '../components/LevelPicker'
 import { IconChevronLeft, IconChevronRight, IconCourt } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
@@ -52,7 +53,7 @@ export default function SessionPage() {
       supabase
         .from('registrations')
         .select(
-          'id, session_id, kind, user_id, guest_name, guest_gender, added_by, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
+          'id, session_id, kind, user_id, guest_name, guest_gender, guest_level, added_by, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
         )
         .eq('session_id', sessionId)
         .neq('status', 'canceled')
@@ -153,6 +154,7 @@ export default function SessionPage() {
   const counted = confirmed.filter((r) => r.kind === 'member' || s.guests_in_capacity)
   const guestCount = confirmed.filter((r) => r.kind === 'guest').length + waitlist.filter((r) => r.kind === 'guest').length
   const orderOf = new Map(counted.map((r, i) => [r.id, i + 1]))
+  const levelOf = (r: RegistrationRow) => (r.kind === 'guest' ? (r.guest_level ?? undefined) : r.user_id ? levels[r.user_id] : undefined)
   const myReg = regs.find((r) => r.kind === 'member' && r.user_id === uid) ?? null
   const myPosition = myReg ? (myReg.status === 'confirmed' ? counted : waitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
   // 게스트 추가: 회원은 투표가 열린 동안, 운영진·번개 개설자는 끝나기 전까지. 대진 공개된 대회는 명단 관리에서
@@ -214,7 +216,7 @@ export default function SessionPage() {
       ) : (
         <List>
           {confirmed.map((r) => (
-            <PersonRow key={r.id} index={orderOf.get(r.id) ?? null} r={r} level={r.user_id ? levels[r.user_id] : undefined} me={r.user_id === uid} />
+            <PersonRow key={r.id} index={orderOf.get(r.id) ?? null} r={r} level={levelOf(r)} me={r.user_id === uid} />
           ))}
         </List>
       )}
@@ -226,7 +228,7 @@ export default function SessionPage() {
           </SectionTitle>
           <List>
             {waitlist.map((r, i) => (
-              <PersonRow key={r.id} index={i + 1} r={r} level={r.user_id ? levels[r.user_id] : undefined} me={r.user_id === uid} />
+              <PersonRow key={r.id} index={i + 1} r={r} level={levelOf(r)} me={r.user_id === uid} />
             ))}
           </List>
         </>
@@ -274,6 +276,7 @@ function GuestCard({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [gender, setGender] = useState<Gender | null>(null)
+  const [level, setLevel] = useState<Level | null>(null)
   const [busy, setBusy] = useState(false)
   const mine = regs.filter((r) => r.kind === 'guest' && (canManage || r.added_by === uid))
   const myCount = regs.filter((r) => r.kind === 'guest' && r.added_by === uid).length
@@ -283,7 +286,7 @@ function GuestCard({
     e.preventDefault()
     if (!name.trim()) return
     setBusy(true)
-    const { data, error } = await supabase.rpc('add_vote_guest', { p_session: s.id, p_name: name.trim(), p_gender: gender })
+    const { data, error } = await supabase.rpc('add_vote_guest', { p_session: s.id, p_name: name.trim(), p_gender: gender, p_level: level })
     setBusy(false)
     if (error) {
       toast.error(errorMessage(error))
@@ -297,6 +300,7 @@ function GuestCard({
     )
     setName('')
     setGender(null)
+    setLevel(null)
     await onChanged()
   }
 
@@ -333,6 +337,7 @@ function GuestCard({
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[15px] font-medium text-ink">{r.guest_name}</span>
                       {r.guest_gender && <GenderMark g={r.guest_gender} />}
+                      {r.guest_level && <Badge tone="outline">{r.guest_level}</Badge>}
                       {r.status === 'waitlisted' && <Badge tone="shuttle">대기</Badge>}
                     </span>
                     {canManage && r.added_by !== uid && r.adder?.display_name && (
@@ -356,14 +361,16 @@ function GuestCard({
           {limitReached ? (
             <p className="mt-3 text-center text-sm text-ink-soft">게스트를 3명 모두 넣었어요.</p>
           ) : (
-            <form onSubmit={add} className="mt-3 flex gap-2">
-              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} placeholder="게스트 이름" aria-label="게스트 이름" className="!mt-0 min-w-0 flex-1" />
-              <div className="flex items-center">
+            <form onSubmit={add} className="mt-3 space-y-2">
+              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={30} placeholder="게스트 이름" aria-label="게스트 이름" className="!mt-0" />
+              <div className="flex items-center gap-2">
                 <GenderToggle compact value={gender} onChange={setGender} label="게스트 성별" />
+                <LevelSelect value={level} onChange={setLevel} label="게스트 급수" />
+                <Button type="submit" variant="secondary" className="ml-auto" disabled={busy || !name.trim()}>
+                  추가
+                </Button>
               </div>
-              <Button type="submit" variant="secondary" disabled={busy || !name.trim()}>
-                추가
-              </Button>
+              <p className="text-xs text-ink-faint">성별·급수는 대진 짤 때 써요. 모르면 비워두세요.</p>
             </form>
           )}
         </div>
