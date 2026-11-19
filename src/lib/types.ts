@@ -42,6 +42,20 @@ export interface ClubMember {
 }
 
 /** club_members + profiles + clubs 조인 결과 */
+/** 동아리 개설 신청 */
+export interface ClubRequest {
+  id: string
+  requested_by: string
+  requester_name: string
+  name: string
+  note: string
+  status: 'pending' | 'approved' | 'rejected' | 'canceled'
+  reason: string | null
+  club_id: string | null
+  created_at: string
+  decided_at: string | null
+}
+
 export interface MembershipWithClub extends ClubMember {
   clubs: Pick<Club, 'id' | 'name' | 'logo_path'> | null
 }

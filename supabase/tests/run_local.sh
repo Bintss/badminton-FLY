@@ -15,6 +15,8 @@ psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f supabase/tests/local_stub.sql
 for f in supabase/migrations/*.sql; do
   psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f "$f"
 done
+# 로컬 테스트 전용 설정 (테스트 사용자를 서비스 관리자로)
+psql "$TEST_URL" -q -v ON_ERROR_STOP=1 -f supabase/tests/local_fixtures.sql
 # m1, m2, … m10 순서 (이름순이면 m10이 m1보다 먼저 돈다)
 for t in $(ls supabase/tests/m*_test.sql | sort -V); do
   echo "== $t"

@@ -13,6 +13,7 @@ import { supabase } from './lib/supabase'
 import BoardPage from './pages/BoardPage'
 import ClubHomePage from './pages/ClubHomePage'
 import ClubsPage from './pages/ClubsPage'
+import ClubRequestsAdminPage from './pages/ClubRequestsAdminPage'
 import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
 import FlashNewPage from './pages/FlashNewPage'
@@ -67,6 +68,7 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route index element={<RootRedirect />} />
             <Route path="/clubs" element={<ClubsPage />} />
+            <Route path="/admin/clubs" element={<ClubRequestsAdminPage />} />
             <Route path="/c/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubHomePage />} />
               <Route path="me" element={<MePage />} />

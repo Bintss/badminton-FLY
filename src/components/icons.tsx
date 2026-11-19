@@ -46,6 +46,14 @@ export function IconChevronRight({ className = 'h-5 w-5' }: P) {
   )
 }
 
+export function IconChevronDown({ className = 'h-5 w-5' }: P) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden {...base}>
+      <path d="M5 9l7 7 7-7" />
+    </svg>
+  )
+}
+
 export function IconPlus({ className = 'h-5 w-5' }: P) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden {...base} strokeWidth={2.2}>
