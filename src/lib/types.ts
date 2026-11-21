@@ -121,6 +121,8 @@ export interface SessionTemplate {
   open_time: string
   active: boolean
   guests_in_capacity: boolean
+  /** 고정 참석자: 일정이 만들어질 때 자동 신청되는 회원 */
+  fixed_user_ids: string[]
 }
 
 /** registrations + 신청자 이름 */
@@ -140,6 +142,8 @@ export interface RegistrationRow {
   side_club_id?: string | null
   guest_gender: 'M' | 'F' | null
   guest_level: string | null
+  /** 정기운동 고정 참석자로 자동 신청됨 */
+  is_fixed?: boolean
   profiles: { display_name: string } | null
   /** 게스트를 데려온 회원 */
   adder?: { display_name: string } | null

@@ -18,6 +18,8 @@ import ClubRequestsAdminPage from './pages/ClubRequestsAdminPage'
 import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
 import FlashNewPage from './pages/FlashNewPage'
+import JoinPage from './pages/JoinPage'
+import { peekInvite, rememberInvite } from './lib/pendingInvite'
 import MembersAdminPage from './pages/MembersAdminPage'
 import SessionPage from './pages/SessionPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -27,8 +29,14 @@ import TournamentPage from './pages/TournamentPage'
 
 function RequireAuth() {
   const { session, loading } = useAuth()
+  const location = useLocation()
   if (loading) return <Page><Spinner /></Page>
-  if (!session) return <Navigate to="/login" replace />
+  if (!session) {
+    // 초대 링크로 왔으면 로그인하고 돌아왔을 때 이어서 가입하도록 기억
+    const m = location.pathname.match(/^\/join\/([^/]+)/)
+    if (m) rememberInvite(m[1])
+    return <Navigate to="/login" replace />
+  }
   return (
     <>
       <ReadFromPush />
@@ -54,6 +62,8 @@ function ReadFromPush() {
 
 /** 루트: 마지막 동아리가 있으면 거기로, 없으면 동아리 선택 (승인 여부는 ClubLayout이 다시 확인) */
 function RootRedirect() {
+  const invite = peekInvite()
+  if (invite) return <Navigate to={`/join/${invite}`} replace />
   const last = getLastClubId()
   return <Navigate to={last ? `/c/${last}` : '/clubs'} replace />
 }
@@ -69,6 +79,7 @@ export default function App() {
           <Route element={<RequireAuth />}>
             <Route index element={<RootRedirect />} />
             <Route path="/clubs" element={<ClubsPage />} />
+            <Route path="/join/:token" element={<JoinPage />} />
             <Route path="/admin/clubs" element={<ClubRequestsAdminPage />} />
             <Route path="/c/:clubId" element={<ClubLayout />}>
               <Route index element={<ClubHomePage />} />

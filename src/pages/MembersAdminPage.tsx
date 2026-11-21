@@ -5,6 +5,7 @@ import { useClub } from '../club/ClubLayout'
 import { IconChevronLeft } from '../components/icons'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { GenderToggle } from '../components/GenderToggle'
+import { InviteLinkCard } from '../components/InviteLinkCard'
 import { Sheet } from '../components/Sheet'
 import { LevelSelect } from '../components/LevelPicker'
 import { useToast } from '../components/toast'
@@ -147,6 +148,8 @@ export default function MembersAdminPage() {
   return (
     <Page title="회원 관리" back={back}>
       <ErrorText>{error}</ErrorText>
+
+      <InviteLinkCard clubId={club.id} clubName={club.name} />
 
       <SectionTitle right={pending.length > 0 ? `${pending.length}명` : undefined}>가입 신청</SectionTitle>
       {pending.length === 0 ? (

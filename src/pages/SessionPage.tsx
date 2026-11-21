@@ -57,7 +57,7 @@ export default function SessionPage() {
       supabase
         .from('registrations')
         .select(
-          'id, session_id, kind, user_id, guest_name, guest_gender, guest_level, added_by, side_club_id, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
+          'id, session_id, kind, user_id, guest_name, guest_gender, guest_level, is_fixed, added_by, side_club_id, status, seq, late_eta, checked_in_at, created_at, promoted_at, profiles!registrations_user_id_fkey(display_name), adder:profiles!registrations_added_by_fkey(display_name)',
         )
         .eq('session_id', sessionId)
         .neq('status', 'canceled')
@@ -403,6 +403,7 @@ function PersonRow({ index, r, level, me }: { index: number | null; r: Registrat
             {me && <Badge tone="court">나</Badge>}
             {level && <Badge tone="outline">{level}</Badge>}
             {r.kind === 'guest' && <Badge>게스트</Badge>}
+            {r.is_fixed && <Badge>고정</Badge>}
           </span>
           {r.kind === 'guest' && r.adder?.display_name && <span className="block truncate text-xs text-ink-faint">{r.adder.display_name}님 손님</span>}
         </span>
@@ -646,6 +647,9 @@ function ActionCard({
           <span className="text-[17px] font-semibold">{isConfirmed ? '번째' : '번 대기'}</span>
         </p>
         {!isConfirmed && <p className="mt-1 text-sm text-ink-soft">앞사람이 취소하면 자동으로 확정돼요.</p>}
+        {myReg.is_fixed && phase !== 'ended' && (
+          <p className="mt-1 text-sm text-ink-soft">고정 참석자라 투표 없이 자동으로 신청됐어요. 못 오면 취소해 주세요.</p>
+        )}
         {latency !== null && <p className="mt-1 text-xs text-ink-faint">서버 응답 {latency}ms</p>}
 
         {phase !== 'ended' && (

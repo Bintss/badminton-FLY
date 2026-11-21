@@ -190,22 +190,24 @@ function ClubSwitcher({ currentId, onClose }: { currentId: string; onClose: () =
 
   return (
     <Sheet title="동아리 전환" onClose={onClose}>
-      {!clubs ? (
-        <ListSkeleton rows={2} />
-      ) : (
-        <div className="divide-y divide-black/[0.06] overflow-hidden rounded-2xl bg-white ring-1 ring-black/[0.06]">
-          {clubs.map((c) => (
-            <button key={c.id} type="button" onClick={() => go(c.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-floor">
-              <ClubLogo club={c} size={36} />
-              <span className="min-w-0 flex-1 truncate font-semibold text-ink">{c.name}</span>
-              {c.id === currentId && <span className="shrink-0 text-sm font-semibold text-court-600">지금 동아리</span>}
-            </button>
-          ))}
-        </div>
-      )}
-      <Link to="/clubs" onClick={onClose} className="mt-3 flex h-12 items-center justify-center rounded-2xl text-sm font-semibold text-ink-soft active:bg-black/5">
-        동아리 목록 (가입·개설 신청)
-      </Link>
+      <div className="p-4">
+        {!clubs ? (
+          <ListSkeleton rows={2} />
+        ) : (
+          <div className="divide-y divide-black/[0.06] overflow-hidden rounded-2xl bg-white ring-1 ring-black/[0.06]">
+            {clubs.map((c) => (
+              <button key={c.id} type="button" onClick={() => go(c.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-floor">
+                <ClubLogo club={c} size={36} />
+                <span className="min-w-0 flex-1 truncate font-semibold text-ink">{c.name}</span>
+                {c.id === currentId && <span className="shrink-0 text-sm font-semibold text-court-600">지금 동아리</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <Link to="/clubs" onClick={onClose} className="mt-3 flex h-12 items-center justify-center rounded-2xl text-sm font-semibold text-ink-soft active:bg-black/5">
+          동아리 목록 (가입·개설 신청)
+        </Link>
+      </div>
     </Sheet>
   )
 }

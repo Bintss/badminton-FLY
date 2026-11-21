@@ -26,6 +26,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   club_not_found: '동아리를 찾을 수 없어요.',
   not_pending: '이미 처리된 신청이에요.',
   not_member: '동아리 회원이 아니에요.',
+  fixed_over_capacity: '고정 참석자가 정원보다 많아요.',
+  invite_invalid: '링크가 바뀌었거나 꺼졌어요. 운영진에게 새 링크를 받아 주세요.',
   last_admin: '마지막 운영진이라 해제하거나 나갈 수 없어요. 다른 사람을 먼저 운영진으로 지정하세요.',
   session_not_found: '운동 일정을 찾을 수 없어요.',
   session_canceled: '취소된 운동이에요.',

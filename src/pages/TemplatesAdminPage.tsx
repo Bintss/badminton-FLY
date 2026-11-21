@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useClub } from '../club/ClubLayout'
 import { Field, Input, Select } from '../components/form'
+import { FixedMembersField, type MemberOption } from '../components/FixedMembersField'
 import { GuestCapacityField } from '../components/GuestCapacityField'
 import { PlaceInput } from '../components/PlaceInput'
 import { IconChevronLeft, IconPlus } from '../components/icons'
@@ -26,6 +27,7 @@ const EMPTY: Draft = {
   open_time: '21:00',
   active: true,
   guests_in_capacity: false,
+  fixed_user_ids: [],
 }
 
 function openRuleText(t: Pick<SessionTemplate, 'weekday' | 'open_days_before' | 'open_time'>) {
@@ -40,6 +42,7 @@ export default function TemplatesAdminPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [members, setMembers] = useState<MemberOption[]>([])
   const toast = useToast()
 
   const load = useCallback(async () => {
@@ -56,6 +59,24 @@ export default function TemplatesAdminPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // 고정 참석자 후보: 승인된 회원 (이름순)
+  useEffect(() => {
+    void supabase
+      .from('club_members')
+      .select('user_id, level, profiles!club_members_user_id_fkey(display_name)')
+      .eq('club_id', club.id)
+      .eq('status', 'approved')
+      .then(({ data }) => {
+        const rows = (data ?? []) as unknown as { user_id: string; level: string | null; profiles: { display_name: string } | null }[]
+        setMembers(
+          rows
+            .map((r) => ({ user_id: r.user_id, level: r.level, name: r.profiles?.display_name ?? '이름 없음' }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+        )
+      })
+  }, [club.id])
+  const memberIds = new Set(members.map((m) => m.user_id))
 
   if (!isAdmin) return <Navigate to={`/c/${club.id}`} replace />
 
@@ -80,13 +101,15 @@ export default function TemplatesAdminPage() {
       p_open_time: draft.open_time,
       p_active: draft.active,
       p_guests_in_capacity: draft.guests_in_capacity,
+      // 동아리를 나간 사람은 빼고 저장
+      p_fixed: draft.fixed_user_ids.filter((id) => memberIds.has(id)),
     })
     setBusy(false)
     if (error) {
       setError(errorMessage(error))
       return
     }
-    toast.success(draft.id ? '정기운동을 수정했어요. 다음에 만들어지는 일정부터 적용돼요' : '정기운동을 등록했어요')
+    toast.success(draft.id ? '정기운동을 수정했어요. 고정 참석자는 이미 만들어진 일정에도 반영돼요' : '정기운동을 등록했어요')
     setDraft(null)
     await load()
   }
@@ -114,7 +137,7 @@ export default function TemplatesAdminPage() {
       }
     >
       <p className="mb-4 text-sm leading-relaxed text-ink-soft">
-        등록한 요일마다 운동 일정이 자동으로 만들어지고, 투표 오픈 7일 전부터 홈에 보여요. 수정 내용은 이후에 만들어지는 일정부터 적용돼요.
+        등록한 요일마다 운동 일정이 자동으로 만들어지고, 투표 오픈 7일 전부터 홈에 보여요. 수정 내용은 이후에 만들어지는 일정부터 적용돼요(고정 참석자는 이미 만들어진 일정에도 반영).
       </p>
       <ErrorText>{error}</ErrorText>
 
@@ -162,6 +185,7 @@ export default function TemplatesAdminPage() {
             </div>
             <p className="rounded-lg bg-court-50 px-3 py-2 text-sm font-medium text-court-700">{openRuleText(draft)}</p>
             <GuestCapacityField checked={draft.guests_in_capacity} onChange={(v) => set('guests_in_capacity', v)} />
+            <FixedMembersField members={members} value={draft.fixed_user_ids} capacity={draft.capacity} onChange={(ids) => set('fixed_user_ids', ids)} />
             <label className="flex items-center gap-2 text-sm text-ink">
               <input type="checkbox" checked={draft.active} onChange={(e) => set('active', e.target.checked)} className="h-5 w-5 accent-court-600" />
               사용 (끄면 새 일정이 만들어지지 않아요)
@@ -195,6 +219,9 @@ export default function TemplatesAdminPage() {
                   {t.place || '장소 미정'} · 정원 {t.capacity}{t.guests_in_capacity ? '(게스트 포함)' : ''} · 코트 {t.court_count}면
                 </p>
                 <p className="text-sm text-ink-soft">{openRuleText(t)}</p>
+                {t.fixed_user_ids.some((id) => memberIds.has(id)) && (
+                  <p className="text-sm text-ink-soft">고정 참석 {t.fixed_user_ids.filter((id) => memberIds.has(id)).length}명</p>
+                )}
               </div>
               <button className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-court-600 active:bg-court-50" onClick={() => setDraft({ ...t })}>
                 수정
