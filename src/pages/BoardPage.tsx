@@ -6,6 +6,7 @@ import { ConfirmButton } from '../components/ConfirmButton'
 import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
 import { GenderToggle } from '../components/GenderToggle'
 import { LevelSelect, type Level } from '../components/LevelPicker'
+import { particle } from '../lib/josa'
 import { Input } from '../components/form'
 import { IconChevronLeft, IconDown, IconSun, IconUndo, IconUp, IconX } from '../components/icons'
 import { useToast } from '../components/toast'
@@ -217,6 +218,12 @@ export default function BoardPage() {
   const tQueued = visible
     .filter((m) => m.status === 'queued' && m.phase === 'scheduled')
     .sort((a, b) => (a.round_no ?? 0) - (b.round_no ?? 0) || (a.order_no ?? 0) - (b.order_no ?? 0))
+  const playerInfo = (id: string): PlayerState => {
+    const p = byId[id]
+    return p
+      ? { name: p.name, confirmed: true, arrived: p.restMin !== null, playingElsewhere: p.is_playing }
+      : { name: names[id] ?? '?', confirmed: false, arrived: false, playingElsewhere: false }
+  }
 
   const back = (
     <Link to={s ? `/c/${club.id}/s/${s.id}` : `/c/${club.id}`} className="-ml-1 inline-flex items-center gap-0.5 text-sm font-medium text-ink-soft">
@@ -276,6 +283,8 @@ export default function BoardPage() {
             canOperate={operating}
             isAdmin={isAdmin}
             myRegIds={new Set(players.filter((p) => p.user_id && p.user_id === uid).map((p) => p.registration_id))}
+            waiting={tMode ? tQueued : []}
+            info={playerInfo}
             onChanged={load}
           />
           {tMode ? (
@@ -283,12 +292,7 @@ export default function BoardPage() {
               queued={tQueued}
               courts={s.court_count}
               nameOf={nameOf}
-              info={(id) => {
-                const p = byId[id]
-                return p
-                  ? { name: p.name, confirmed: true, arrived: p.restMin !== null, playingElsewhere: p.is_playing }
-                  : { name: names[id] ?? '?', confirmed: false, arrived: false, playingElsewhere: false }
-              }}
+              info={playerInfo}
               canCancel={operating && isAdmin}
               tournamentLink={`/c/${club.id}/s/${s.id}/tournament`}
               onChanged={load}
@@ -332,6 +336,8 @@ function Courts({
   canOperate,
   isAdmin,
   myRegIds,
+  waiting,
+  info,
   onChanged,
 }: {
   s: SessionOverview
@@ -342,6 +348,9 @@ function Courts({
   isAdmin: boolean
   /** 내 신청 id (대회 경기 점수 입력 권한 판단) */
   myRegIds: Set<string>
+  /** 대회: 남은 대회 경기 (매치 순). 빈 코트에 무엇을 기다리는지 보여준다 */
+  waiting: MatchRow[]
+  info: (id: string) => PlayerState
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -377,6 +386,9 @@ function Courts({
       {courts.map((no) => {
         const m = playing.find((x) => x.court_no === no)
         const sides = m ? teamsOf(m.match_players) : [[], []]
+        // 대회: 빈 코트는 자기 다음 경기만 기다린다 (뒤 경기를 당겨오지 않음)
+        const next = !m ? waiting.find((w) => courtOf(w.order_no, s.court_count) === no) : undefined
+        const nextWhy = next ? blockReason(next as unknown as ScheduledMatch, info) : null
         return (
           <div key={no}>
             <div className="mb-1.5 flex items-baseline justify-between px-1">
@@ -408,8 +420,10 @@ function Courts({
                   ))}
                 </div>
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="rounded-md bg-court-50/90 px-2 py-0.5 text-sm font-medium text-court-700">비어 있음</span>
+                <div className="absolute inset-0 flex items-center justify-center px-3">
+                  <span className="rounded-md bg-court-50/90 px-2 py-0.5 text-center text-sm font-medium text-court-700">
+                    {next ? `매치 ${next.round_no} 기다리는 중${nextWhy ? ` · ${nextWhy}` : ''}` : '비어 있음'}
+                  </span>
                 </div>
               )}
             </div>
@@ -558,6 +572,13 @@ function TournamentQueue({
   const [busy, setBusy] = useState(false)
   const [all, setAll] = useState(false)
   const shown = all ? queued : queued.slice(0, TQUEUE_PREVIEW)
+  // 코트마다 바로 다음 경기 (그 경기만 코트에 들어갈 수 있다)
+  const heads = new Set<string>()
+  const seen = new Set<number>()
+  for (const m of queued) {
+    const c = courtOf(m.order_no, courts)
+    if (!seen.has(c)) (seen.add(c), heads.add(m.id))
+  }
 
   const cancel = async (m: MatchRow) => {
     setBusy(true)
@@ -581,11 +602,17 @@ function TournamentQueue({
         <List>
           {shown.map((m) => {
             const [t1, t2] = teamsOf(m.match_players)
-            const reason = blockReason(m as unknown as ScheduledMatch, info)
+            const head = heads.has(m.id)
+            const reason = head ? blockReason(m as unknown as ScheduledMatch, info) : null
             const court = courtOf(m.order_no, courts)
+            const sub = !head
+              ? `매치 ${m.round_no}. 코트 ${court} 앞 경기들이 끝나면 차례예요`
+              : reason
+                ? `${reason}. 코트 ${court}${particle(String(court), '은', '는')} 이 경기를 기다려요`
+                : `매치 ${m.round_no}. 앞 경기가 끝나면 코트 ${court}에 들어가요`
             return (
               <div key={m.id} className="flex items-center gap-2 px-3 py-2.5">
-                <span className={`flex w-9 shrink-0 flex-col items-center leading-none ${reason ? 'text-ink-faint' : 'text-court-600'}`}>
+                <span className={`flex w-9 shrink-0 flex-col items-center leading-none ${head && !reason ? 'text-court-600' : 'text-ink-faint'}`}>
                   <span className="text-[10px] font-semibold">코트</span>
                   <span className="score text-[19px] font-semibold">{court}</span>
                 </span>
@@ -594,7 +621,7 @@ function TournamentQueue({
                     <span className="whitespace-nowrap">{t1.map(nameOf).join(', ')}</span> <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
                     <span className="whitespace-nowrap">{t2.map(nameOf).join(', ')}</span>
                   </p>
-                  <p className={`text-xs ${reason ? 'text-shuttle-800' : 'text-court-600'}`}>{reason ? reason : `매치 ${m.round_no}. 앞 경기가 끝나면 코트 ${court}에 들어가요`}</p>
+                  <p className={`text-xs ${!head ? 'text-ink-faint' : reason ? 'text-shuttle-800' : 'text-court-600'}`}>{sub}</p>
                 </div>
                 {canCancel && (
                   <ConfirmButton
