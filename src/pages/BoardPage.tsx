@@ -4,13 +4,14 @@ import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
-import { GenderMark, GenderToggle } from '../components/GenderToggle'
+import { GenderToggle } from '../components/GenderToggle'
 import { LevelSelect, type Level } from '../components/LevelPicker'
 import { particle } from '../lib/josa'
 import { Input } from '../components/form'
-import { IconChevronLeft, IconDown, IconSun, IconUndo, IconUp, IconX } from '../components/icons'
+import { IconChevronLeft, IconDown, IconSun, IconUp, IconX } from '../components/icons'
 import { useToast } from '../components/toast'
-import { Badge, Button, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
+import { Sheet } from '../components/Sheet'
+import { Button, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
 import { DEFAULT_TZ, formatTime, trimSeconds } from '../lib/datetime'
 import { useServerNow } from '../lib/serverTime'
 import { errorMessage, supabase } from '../lib/supabase'
@@ -33,6 +34,7 @@ interface PlayerStat {
   last_finished_at: string | null
   is_playing: boolean
   queued_count: number
+  left_at: string | null
 }
 
 interface MatchRow {
@@ -99,7 +101,8 @@ export default function BoardPage() {
   const [stats, setStats] = useState<PlayerStat[]>([])
   const [matches, setMatches] = useState<MatchRow[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
-  const [meta, setMeta] = useState<Record<string, { level?: string; gender?: 'M' | 'F' }>>({})
+  const [meta, setMeta] = useState<Record<string, { level?: string; gender?: 'M' | 'F'; side?: string }>>({})
+  const [closedCourts, setClosedCourts] = useState<number[]>([])
   const [canOperate, setCanOperate] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
@@ -108,7 +111,7 @@ export default function BoardPage() {
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!sessionId) return
     const ticket = take()
-    const [ov, st, ms, rs, op] = await Promise.all([
+    const [ov, st, ms, rs, op, cc] = await Promise.all([
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase.from('session_player_stats').select('*').eq('session_id', sessionId),
       supabase
@@ -122,6 +125,7 @@ export default function BoardPage() {
         .eq('session_id', sessionId),
       // 조작 권한은 시간(시작 3시간 전부터)·참석 확정에 따라 바뀌므로 매번 다시 확인
       supabase.rpc('can_operate_board', { p_session: sessionId }),
+      supabase.from('sessions').select('closed_courts').eq('id', sessionId).maybeSingle(),
     ])
     if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     const err = ov.error ?? st.error ?? ms.error ?? rs.error
@@ -130,6 +134,7 @@ export default function BoardPage() {
       return // 실패한 응답으로 화면을 비우지 않는다
     }
     if (!op.error) setCanOperate(Boolean(op.data))
+    if (!cc.error) setClosedCourts(((cc.data as { closed_courts: number[] } | null)?.closed_courts ?? []).map(Number))
     setS((ov.data as SessionOverview | null) ?? null)
     setStats((st.data as PlayerStat[] | null) ?? [])
     setMatches((ms.data as MatchRow[] | null) ?? [])
@@ -153,9 +158,13 @@ export default function BoardPage() {
     let alive = true
     void supabase.rpc('session_player_meta', { p_session: sessionId }).then(({ data }) => {
       if (!alive) return
-      const map: Record<string, { level?: string; gender?: 'M' | 'F' }> = {}
-      for (const m of (data as { registration_id: string; level: string | null; gender: string | null }[] | null) ?? [])
-        map[m.registration_id] = { level: m.level ?? undefined, gender: m.gender === 'M' || m.gender === 'F' ? m.gender : undefined }
+      const map: Record<string, { level?: string; gender?: 'M' | 'F'; side?: string }> = {}
+      for (const m of (data as { registration_id: string; level: string | null; gender: string | null; side_club_id: string | null }[] | null) ?? [])
+        map[m.registration_id] = {
+          level: m.level ?? undefined,
+          gender: m.gender === 'M' || m.gender === 'F' ? m.gender : undefined,
+          side: m.side_club_id ?? undefined,
+        }
       setMeta(map)
     })
     return () => {
@@ -274,7 +283,7 @@ export default function BoardPage() {
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h1 className="text-[22px] font-bold tracking-tight text-ink">대진판</h1>
         <span className="flex items-center gap-2 text-sm text-ink-soft">
-          {formatTime(s.starts_at, tz)}~{formatTime(s.ends_at, tz)}, 코트 {s.court_count}면
+          {formatTime(s.starts_at, tz)}~{formatTime(s.ends_at, tz)}
           {awake && (
             <span className="inline-flex items-center gap-1 text-court-600" title="대진판을 보는 동안 화면이 꺼지지 않아요">
               <IconSun className="h-4 w-4" />
@@ -307,6 +316,8 @@ export default function BoardPage() {
             myRegIds={new Set(players.filter((p) => p.user_id && p.user_id === uid).map((p) => p.registration_id))}
             waiting={tMode ? tQueued : []}
             info={playerInfo}
+            closed={closedCourts}
+            tournament={tMode}
             onChanged={load}
           />
           {tMode ? (
@@ -320,10 +331,29 @@ export default function BoardPage() {
               onChanged={load}
             />
           ) : (
-            <Queue queued={queued} nameOf={nameOf} canOperate={operating} onChanged={load} />
+            // 자율 경기: 대기 경기는 참석자 아래(폰). 가로 화면에서는 코트 아래
+            <div className="hidden md:block">
+              <Queue queued={queued} nameOf={nameOf} canOperate={operating} onChanged={load} />
+            </div>
           )}
         </div>
-        <Players sessionId={s.id} players={players} canOperate={operating} selectable={operating && !tMode} tournament={tMode} onChanged={load} />
+        <div>
+          <Players
+            sessionId={s.id}
+            players={players}
+            canOperate={operating}
+            selectable={operating && !tMode}
+            tournament={tMode}
+            canManage={(p) => operating && isAdmin && (s.club_id === club.id || meta[p.registration_id]?.side === club.id)}
+            myUid={uid}
+            onChanged={load}
+          />
+          {!tMode && (
+            <div className="mt-6 md:hidden">
+              <Queue queued={queued} nameOf={nameOf} canOperate={operating} onChanged={load} />
+            </div>
+          )}
+        </div>
       </div>
     </Page>
   )
@@ -360,6 +390,8 @@ function Courts({
   myRegIds,
   waiting,
   info,
+  closed,
+  tournament,
   onChanged,
 }: {
   s: SessionOverview
@@ -373,6 +405,9 @@ function Courts({
   /** 대회: 남은 대회 경기 (매치 순). 빈 코트에 무엇을 기다리는지 보여준다 */
   waiting: MatchRow[]
   info: (id: string) => PlayerState
+  /** 운영진이 닫은 코트 */
+  closed: number[]
+  tournament: boolean
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -403,10 +438,58 @@ function Courts({
     setBusy(null)
   }
 
+  const setOpen = async (no: number, open: boolean) => {
+    setBusy(`court-${no}`)
+    const { error } = await supabase.rpc('set_court_open', { p_session: s.id, p_court: no, p_open: open })
+    if (error) toast.error(errorMessage(error))
+    else toast.info(open ? `코트 ${no}를 열었어요` : `코트 ${no}를 닫았어요. 새 경기를 넣지 않아요`)
+    await onChanged()
+    setBusy(null)
+  }
+  const setCount = async (n: number) => {
+    setBusy('count')
+    const { error } = await supabase.rpc('set_court_count', { p_session: s.id, p_count: n })
+    if (error) toast.error(errorMessage(error))
+    await onChanged()
+    setBusy(null)
+  }
+  const openCount = courts.filter((no) => !closed.includes(no)).length
+
   return (
-    // 코트는 두 줄로: 폰에서도 코트 4면이 한 화면 안에 들어오고 참석자 목록이 덜 밀려나게
+    <>
+    <div className="mb-2 flex items-center justify-between">
+      <span className="text-[13px] font-semibold text-ink-soft">
+        코트 <span className="score text-[16px] text-ink">{openCount}</span>
+        {openCount !== s.court_count && <span className="text-ink-faint"> / {s.court_count}면 (닫힘 {s.court_count - openCount})</span>}
+        {openCount === s.court_count && '면'}
+      </span>
+      {canOperate && !tournament && (
+        <span className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="코트 줄이기"
+            disabled={busy === 'count' || s.court_count <= 1}
+            onClick={() => void setCount(s.court_count - 1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] text-lg font-bold text-ink-soft disabled:opacity-40"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="코트 늘리기"
+            disabled={busy === 'count' || s.court_count >= 20}
+            onClick={() => void setCount(s.court_count + 1)}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] text-lg font-bold text-ink-soft disabled:opacity-40"
+          >
+            +
+          </button>
+        </span>
+      )}
+    </div>
+    {/* 코트는 두 줄로: 폰에서도 코트 4면이 한 화면 안에 들어오고 참석자 목록이 덜 밀려나게 */}
     <section className="grid grid-cols-2 gap-x-3 gap-y-4">
       {courts.map((no) => {
+        const isClosed = closed.includes(no)
         const m = playing.find((x) => x.court_no === no)
         const sides = m ? teamsOf(m.match_players) : [[], []]
         // 대회: 빈 코트는 자기 다음 경기만 기다린다 (뒤 경기를 당겨오지 않음)
@@ -419,12 +502,28 @@ function Courts({
                 코트 <span className="score text-[17px] text-ink">{no}</span>
                 {m?.phase === 'scheduled' && <span className="ml-1.5 font-semibold text-court-600">매치 {m.round_no}</span>}
               </span>
-              {m?.started_at && (
-                <span className="score text-[15px] font-semibold text-ink-soft">{Math.max(0, Math.floor((now - Date.parse(m.started_at)) / 60000))}분</span>
-              )}
+              <span className="flex items-baseline gap-2">
+                {m?.started_at && (
+                  <span className="score text-[15px] font-semibold text-ink-soft">{Math.max(0, Math.floor((now - Date.parse(m.started_at)) / 60000))}분</span>
+                )}
+                {canOperate && (
+                  <button
+                    type="button"
+                    disabled={busy === `court-${no}`}
+                    onClick={() => void setOpen(no, isClosed)}
+                    className={`text-[12px] font-semibold underline-offset-2 ${isClosed ? 'text-court-600 underline' : 'text-ink-faint'}`}
+                  >
+                    {isClosed ? '열기' : '닫기'}
+                  </button>
+                )}
+              </span>
             </div>
-            <div className={`relative aspect-[1.55/1] overflow-hidden rounded-xl ${m ? 'bg-court-600' : 'border border-dashed border-court-200 bg-court-50'}`}>
-              <CourtLines empty={!m} />
+            <div
+              className={`relative aspect-[1.55/1] overflow-hidden rounded-xl ${
+                m ? `bg-court-600 ${isClosed ? 'opacity-70' : ''}` : isClosed ? 'bg-black/[0.06]' : 'border border-dashed border-court-200 bg-court-50'
+              }`}
+            >
+              {!isClosed || m ? <CourtLines empty={!m} /> : null}
               {m ? (
                 <div className="absolute inset-0 grid grid-cols-2">
                   {sides.map((side, i) => (
@@ -443,7 +542,7 @@ function Courts({
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center p-2">
                   <span className="line-clamp-3 rounded-md bg-court-50/90 px-1.5 py-0.5 text-center text-[13px] font-medium leading-snug text-court-700">
-                    {next ? `매치 ${next.round_no} 기다리는 중${nextWhy ? ` · ${nextWhy}` : ''}` : '비어 있음'}
+                    {isClosed ? '닫힌 코트' : next ? `매치 ${next.round_no} 기다리는 중${nextWhy ? ` · ${nextWhy}` : ''}` : '비어 있음'}
                   </span>
                 </div>
               )}
@@ -494,6 +593,7 @@ function Courts({
         />
       )}
     </section>
+    </>
   )
 }
 
@@ -681,6 +781,8 @@ function Players({
   canOperate,
   selectable,
   tournament,
+  canManage,
+  myUid,
   onChanged,
 }: {
   sessionId: string
@@ -690,6 +792,9 @@ function Players({
   /** 4명 골라 경기 만들기 (대회 중에는 꺼짐) */
   selectable: boolean
   tournament: boolean
+  /** 남의 퇴근·도착 상태를 바꿀 수 있는 운영진인가 */
+  canManage: (p: Player) => boolean
+  myUid: string | undefined
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
@@ -699,20 +804,27 @@ function Players({
   const [guestGender, setGuestGender] = useState<'M' | 'F' | null>(null)
   const [guestLevel, setGuestLevel] = useState<Level | null>(null)
   const [busy, setBusy] = useState(false)
+  const [manage, setManage] = useState(false)
+  const [acting, setActing] = useState<Player | null>(null)
+  const [showLeft, setShowLeft] = useState(false)
 
-  // 선택한 사람이 명단에서 빠지면(참석 취소 등) 선택에서도 뺀다
-  const valid = selectable ? selected.filter((id) => players.some((p) => p.registration_id === id)) : []
+  const isLeft = (p: Player) => !!p.left_at
+  const isAway = (p: Player) => p.restMin === null && !isLeft(p)
+  const isIdle = (p: Player) => p.restMin !== null && !p.is_playing && p.queued_count === 0
+  // 쉬는 사람(경기 만들 사람) → 경기 중·대기 → 아직 안 옴. 퇴근한 사람은 접어 둔다
+  const idle = players.filter(isIdle)
+  const busyList = players.filter((p) => p.restMin !== null && !isIdle(p))
+  const away = players.filter(isAway)
+  const left = players.filter(isLeft)
+  const anyManage = players.some(canManage)
+
+  // 선택한 사람이 명단에서 빠지면(참석 취소·퇴근 등) 선택에서도 뺀다
+  const valid = selectable ? selected.filter((id) => players.some((p) => p.registration_id === id && !isLeft(p))) : []
   const busyPeople = valid.filter((id) => {
     const p = players.find((x) => x.registration_id === id)
     return p && (p.is_playing || p.queued_count > 0)
   })
   const arrivedCount = players.filter((p) => p.restMin !== null).length
-  // 쉬는 사람(경기 만들 사람)을 맨 위에 모으고, 경기 중·대기와 안 온 사람은 아래로
-  const groups: { key: 'idle' | 'busy' | 'away'; title: string; list: Player[] }[] = [
-    { key: 'idle', title: tournament ? '쉬는 사람' : '쉬는 사람 · 게임 적은 순', list: players.filter((p) => p.restMin !== null && !p.is_playing && p.queued_count === 0) },
-    { key: 'busy', title: tournament ? '경기 중 · 남은 경기 있음' : '경기 중 · 대기', list: players.filter((p) => p.restMin !== null && (p.is_playing || p.queued_count > 0)) },
-    { key: 'away', title: '아직 안 옴', list: players.filter((p) => p.restMin === null) },
-  ]
 
   const toggle = (id: string) => {
     setWarned(false)
@@ -742,7 +854,15 @@ function Players({
   const setCheckIn = async (p: Player, value: boolean) => {
     const { error } = await supabase.rpc('set_checked_in', { p_registration: p.registration_id, p_checked_in: value })
     if (error) toast.error(errorMessage(error))
-    else if (!value) toast.info(`${p.name}님 도착을 취소했어요`)
+    else toast.info(value ? `${p.name}님 도착` : `${p.name}님 도착을 취소했어요`)
+    await onChanged()
+  }
+
+  const setLeft = async (p: Player, value: boolean) => {
+    const { data, error } = await supabase.rpc('set_left', { p_registration: p.registration_id, p_left: value })
+    if (error) toast.error(errorMessage(error))
+    else if (value) toast.info(`${p.name}님 퇴근${(data as number) > 0 ? `, 대기 경기 ${data}개를 취소했어요` : ''}`)
+    else toast.success(`${p.name}님 복귀`)
     await onChanged()
   }
 
@@ -762,119 +882,148 @@ function Players({
     await onChanged()
   }
 
+  /** 이름표 누르기: 관리 모드면 상태 바꾸기 창, 안 온 사람은 도착, 나머지는 경기 고르기 */
+  const tap = (p: Player) => {
+    if (manage) return canManage(p) || p.user_id === myUid ? setActing(p) : toast.info('다른 편 선수는 그 편 운영진이 바꿀 수 있어요')
+    if (isAway(p)) return canOperate ? void setCheckIn(p, true) : undefined
+    if (selectable) toggle(p.registration_id)
+  }
+
+  const chip = (p: Player) => {
+    const isSel = valid.includes(p.registration_id)
+    const idleNow = isIdle(p)
+    const longRest = idleNow && !tournament && (p.restMin ?? 0) >= REST_ALERT_MIN
+    const away = isAway(p)
+    const clickable = manage || (away && canOperate) || (!away && selectable)
+    const status = away
+      ? p.late_eta
+        ? `${trimSeconds(p.late_eta)} 예정`
+        : canOperate
+          ? '눌러서 도착'
+          : '아직'
+      : idleNow
+        ? `${p.restMin}분`
+        : p.is_playing
+          ? '경기 중'
+          : tournament
+            ? `${p.queued_count}경기 남음`
+            : '대기'
+    return (
+      <button
+        key={p.registration_id}
+        type="button"
+        disabled={!clickable}
+        aria-pressed={selectable && !manage ? isSel : undefined}
+        onClick={() => tap(p)}
+        className={`relative min-w-0 overflow-hidden rounded-lg border py-1.5 pl-2 pr-1 text-left disabled:cursor-default ${
+          isSel
+            ? 'border-court-600 bg-court-600 text-white'
+            : away
+              ? 'border-dashed border-black/15 bg-transparent'
+              : longRest
+                ? 'border-shuttle-200 bg-shuttle-100'
+                : idleNow
+                  ? 'border-black/[0.08] bg-white'
+                  : 'border-transparent bg-black/[0.04]'
+        } ${clickable ? 'active:scale-[0.97]' : ''} ${manage && !isSel ? 'ring-1 ring-ink/10' : ''}`}
+      >
+        {/* 성별은 왼쪽 띠 색으로 (남 하늘, 여 분홍) */}
+        {p.gender && <span className={`absolute inset-y-0 left-0 w-1 ${p.gender === 'M' ? 'bg-sky-500' : 'bg-rose-400'}`} aria-label={p.gender === 'M' ? '남' : '여'} />}
+        <span className="flex items-baseline gap-0.5">
+          <span className={`truncate text-[14px] font-bold leading-tight ${isSel ? 'text-white' : away ? 'text-ink-faint' : idleNow ? 'text-ink' : 'text-ink-soft'}`}>{p.name}</span>
+          {p.level && <span className={`shrink-0 text-[10px] font-semibold ${isSel ? 'text-white/80' : 'text-ink-faint'}`}>{p.level.replace('조', '')}</span>}
+        </span>
+        <span className={`mt-0.5 flex items-center gap-1 text-[11px] leading-none ${isSel ? 'text-white/85' : 'text-ink-soft'}`}>
+          {!away && <span className="score">{p.games}겜</span>}
+          <span className={`truncate ${longRest && !isSel ? 'font-semibold text-shuttle-800' : !idleNow && !away && !isSel ? 'font-semibold text-court-600' : ''}`}>{status}</span>
+        </span>
+        {isSel && (
+          <span className="score absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-[10px] font-bold text-court-700">
+            {valid.indexOf(p.registration_id) + 1}
+          </span>
+        )}
+      </button>
+    )
+  }
+
+  const label = (text: string, n: number) => (
+    <p className="col-span-full mt-1 px-0.5 text-[12px] font-semibold text-ink-soft first:mt-0">
+      {text} <span className="score text-[13px] text-ink">{n}</span>
+    </p>
+  )
+
+  const me = players.find((p) => p.user_id && p.user_id === myUid)
+
   return (
     <section>
-      <SectionTitle right={`도착 ${arrivedCount}/${players.length}`}>참석자</SectionTitle>
-      {canOperate && (
-        <p className="-mt-1 mb-2 text-xs text-ink-faint">
-          {tournament ? '대회 중에는 경기를 새로 만들지 않아요. 온 사람은 도착을 눌러 주세요.' : '4명을 눌러 경기를 만들어요. 선택한 순서대로 1·2번이 한 팀, 3·4번이 한 팀이에요.'}
-        </p>
-      )}
+      <SectionTitle
+        right={
+          anyManage ? (
+            <button
+              type="button"
+              onClick={() => (setManage((v) => !v), setSelected([]))}
+              className={`rounded-full px-3 py-1 text-sm font-semibold ${manage ? 'bg-ink text-white' : 'bg-black/[0.05] text-ink-soft'}`}
+            >
+              {manage ? '관리 끝내기' : '인원 관리'}
+            </button>
+          ) : (
+            `도착 ${arrivedCount}/${players.length}`
+          )
+        }
+      >
+        참석자 {anyManage && <span className="ml-1 text-sm font-medium text-ink-faint">도착 {arrivedCount}/{players.length}</span>}
+      </SectionTitle>
+      <p className="-mt-1 mb-2 text-xs text-ink-faint">
+        {manage
+          ? '이름을 누르면 퇴근·복귀·도착 취소를 할 수 있어요.'
+          : tournament
+            ? '대회 중에는 경기를 새로 만들지 않아요. 안 온 사람은 이름을 눌러 도착 처리해요.'
+            : canOperate
+              ? '4명을 누르면 1·2번 vs 3·4번으로 경기를 만들어요. 점선은 아직 안 온 사람이에요(누르면 도착).'
+              : '게임 수가 적은 순서예요.'}
+      </p>
       {players.length === 0 ? (
         <Empty title="참석 확정자가 없어요" />
       ) : (
-        <div className="space-y-4">
-          {groups.map(
-            (g) =>
-              g.list.length > 0 && (
-                <div key={g.key}>
-                  <p className="mb-1.5 px-0.5 text-[13px] font-semibold text-ink-soft">
-                    {g.title} <span className="score text-[15px] text-ink">{g.list.length}</span>
-                  </p>
-                  {g.key === 'away' ? (
-                    <List>
-                      {g.list.map((p) => (
-                        <div key={p.registration_id} className="flex items-center gap-2 px-3 py-2">
-                          <div className="min-w-0 flex-1">
-                            <span className="flex items-center gap-1.5">
-                              <span className="truncate text-[15px] font-semibold text-ink-faint">{p.name}</span>
-                              <GenderMark g={p.gender} />
-                              {p.level && <Badge tone="outline">{p.level}</Badge>}
-                              {p.kind === 'guest' && <Badge>게스트</Badge>}
-                            </span>
-                            {p.late_eta && <span className="block text-xs text-ink-faint">{trimSeconds(p.late_eta)} 도착 예정</span>}
-                          </div>
-                          {canOperate && (
-                            <button
-                              className="h-10 shrink-0 rounded-xl bg-court-600 px-3.5 text-sm font-semibold text-white active:bg-court-700"
-                              onClick={() => void setCheckIn(p, true)}
-                            >
-                              도착
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </List>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      {g.list.map((p) => {
-                        const isSel = valid.includes(p.registration_id)
-                        const idle = g.key === 'idle'
-                        const longRest = idle && !tournament && (p.restMin ?? 0) >= REST_ALERT_MIN
-                        return (
-                          <div
-                            key={p.registration_id}
-                            role={selectable ? 'button' : undefined}
-                            aria-pressed={selectable ? isSel : undefined}
-                            tabIndex={selectable ? 0 : undefined}
-                            onClick={selectable ? () => toggle(p.registration_id) : undefined}
-                            onKeyDown={selectable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(p.registration_id)) : undefined}
-                            className={`relative rounded-xl border px-2.5 py-2 ${
-                              isSel
-                                ? 'border-court-600 bg-court-50 ring-1 ring-court-600'
-                                : longRest
-                                  ? 'border-shuttle-200 bg-shuttle-100/70'
-                                  : idle
-                                    ? 'border-black/[0.07] bg-white'
-                                    : 'border-transparent bg-black/[0.035]'
-                            } ${selectable ? 'cursor-pointer select-none active:scale-[0.98]' : ''}`}
-                          >
-                            <div className="flex items-center gap-1">
-                              <span className={`truncate text-[16px] font-bold ${idle ? 'text-ink' : 'text-ink-soft'}`}>{p.name}</span>
-                              <GenderMark g={p.gender} className="shrink-0" />
-                              {isSel && (
-                                <span className="score ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-court-600 text-[13px] font-bold text-white">
-                                  {valid.indexOf(p.registration_id) + 1}
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-soft">
-                              {p.level && <span className="font-semibold text-ink">{p.level}</span>}
-                              {p.kind === 'guest' && <span>게스트</span>}
-                              <span className="score text-[13px]">{p.games}게임</span>
-                              <span className={`ml-auto shrink-0 ${longRest ? 'font-semibold text-shuttle-800' : !idle ? 'font-semibold text-court-600' : ''}`}>
-                                {idle
-                                  ? `${p.restMin}분`
-                                  : p.is_playing
-                                    ? '경기 중'
-                                    : tournament
-                                      ? `${p.queued_count}경기 남음`
-                                      : '대기'}
-                              </span>
-                            </div>
-                            {canOperate && idle && p.games === 0 && !isSel && (
-                              <ConfirmButton
-                                label={<IconUndo className="h-4 w-4" />}
-                                ariaLabel={`${p.name} 도착 취소`}
-                                confirmLabel="도착 취소"
-                                className="absolute right-1 top-1 h-7 w-7 text-ink-faint active:bg-black/5"
-                                armedClassName="absolute right-1 top-1 h-7 bg-danger/10 px-2 text-xs text-danger"
-                                onConfirm={() => void setCheckIn(p, false)}
-                              />
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              ),
+        <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5 md:grid-cols-4">
+          {label(tournament ? '쉬는 사람' : '쉬는 사람 · 게임 적은 순', idle.length)}
+          {idle.map(chip)}
+          {busyList.length > 0 && label(tournament ? '경기 중 · 남은 경기' : '경기 중 · 대기', busyList.length)}
+          {busyList.map(chip)}
+          {away.length > 0 && label('아직 안 옴', away.length)}
+          {away.map(chip)}
+          {left.length > 0 && (
+            <button type="button" onClick={() => setShowLeft((v) => !v)} className="col-span-full mt-1 flex items-center gap-1 px-0.5 text-left text-[12px] font-semibold text-ink-faint">
+              퇴근 <span className="score text-[13px]">{left.length}</span> {showLeft ? '접기' : '보기'}
+            </button>
           )}
+          {showLeft &&
+            left.map((p) => (
+              <button
+                key={p.registration_id}
+                type="button"
+                disabled={!(manage && (canManage(p) || p.user_id === myUid))}
+                onClick={() => setActing(p)}
+                className="min-w-0 truncate rounded-lg bg-black/[0.03] px-2 py-1.5 text-left text-[13px] text-ink-faint line-through decoration-ink-faint/40"
+              >
+                {p.name}
+              </button>
+            ))}
         </div>
       )}
       <p className="mt-2 text-xs leading-relaxed text-ink-faint">
         {REST_ALERT_MIN}분 넘게 쉰 사람은 노란색이에요. 쉰 시간은 도착한 때부터 세서, 늦게 온 사람이 불리하지 않아요.
       </p>
+      {/* 운영진이 아니어도 본인은 퇴근 처리할 수 있다 */}
+      {!anyManage && canOperate && me && !isLeft(me) && me.restMin !== null && !me.is_playing && (
+        <ConfirmButton
+          label="나 퇴근하기"
+          confirmLabel="게임판에서 빠지기"
+          className="mt-2 h-9 px-3 text-sm font-medium text-ink-soft"
+          armedClassName="mt-2 h-9 bg-danger px-3 text-sm text-white"
+          onConfirm={() => void setLeft(me, true)}
+        />
+      )}
 
       {canOperate && (
         <form onSubmit={addGuest} className="mt-4 space-y-2">
@@ -889,8 +1038,54 @@ function Players({
         </form>
       )}
 
+      {acting && (
+        <Sheet title={acting.name} onClose={() => setActing(null)}>
+          <div className="space-y-2 p-4">
+            {(() => {
+              const p = players.find((x) => x.registration_id === acting.registration_id) ?? acting
+              const close = (fn: () => Promise<void>) => () => void fn().then(() => setActing(null))
+              if (isLeft(p))
+                return (
+                  <>
+                    <p className="text-sm text-ink-soft">퇴근 처리된 사람이에요.</p>
+                    <Button className="w-full" onClick={close(() => setLeft(p, false))}>
+                      복귀 (다시 도착)
+                    </Button>
+                  </>
+                )
+              if (isAway(p))
+                return (
+                  <>
+                    <p className="text-sm text-ink-soft">아직 도착 전이에요.</p>
+                    <Button className="w-full" onClick={close(() => setCheckIn(p, true))}>
+                      도착 처리
+                    </Button>
+                  </>
+                )
+              if (p.is_playing) return <p className="text-sm text-ink-soft">지금 경기 중이에요. 경기가 끝난 뒤에 퇴근 처리할 수 있어요.</p>
+              return (
+                <>
+                  <p className="text-sm text-ink-soft">
+                    {p.games}게임, {p.queued_count > 0 ? (tournament ? `대회 경기 ${p.queued_count}개 남음` : `대기 경기 ${p.queued_count}개`) : `${p.restMin}분째 쉬는 중`}
+                  </p>
+                  <Button className="w-full bg-danger text-white" onClick={close(() => setLeft(p, true))}>
+                    퇴근 처리{!tournament && p.queued_count > 0 ? ` (대기 경기 ${p.queued_count}개 취소)` : ''}
+                  </Button>
+                  {tournament && p.queued_count > 0 && <p className="text-xs text-ink-faint">남은 대회 경기는 대진표에서 선수를 바꿔 주세요.</p>}
+                  {p.games === 0 && p.queued_count === 0 && (
+                    <Button variant="secondary" className="w-full" onClick={close(() => setCheckIn(p, false))}>
+                      도착 취소 (잘못 누른 경우)
+                    </Button>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        </Sheet>
+      )}
+
       {/* 선택 바: 하단 탭 바로 위에 붙는다 */}
-      {selectable && valid.length > 0 && (
+      {selectable && !manage && valid.length > 0 && (
         <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-black/[0.08] bg-white/95 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur">
           <div className="mx-auto max-w-md px-4 py-3">
             <p className="mb-2 truncate text-sm text-ink">
