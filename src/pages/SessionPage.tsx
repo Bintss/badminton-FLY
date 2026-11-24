@@ -41,11 +41,11 @@ export default function SessionPage() {
 
   const [s, setS] = useState<SessionOverview | null>(null)
   const [regs, setRegs] = useState<RegistrationRow[]>([])
-  const [levels, setLevels] = useState<Record<string, string>>({})
   const [hostName, setHostName] = useState<string | null>(null)
   // 교류전: 두 동아리 이름, 참석자 급수(상대 회원 것도)
   const [clubNames, setClubNames] = useState<Record<string, string>>({})
-  const [metaLevels, setMetaLevels] = useState<Record<string, string>>({})
+  // 급수·성별: 회원·게스트·교류전 상대 회원 모두 (신청 단위)
+  const [meta, setMeta] = useState<Record<string, { level?: string; gender?: 'M' | 'F' }>>({})
   const [loaded, setLoaded] = useState(false)
 
   const take = useLatest()
@@ -75,18 +75,21 @@ export default function SessionPage() {
   }, [load])
   useRefetchOnResume(load)
 
+  const regKey = regs.map((r) => r.id).join(',')
   useEffect(() => {
-    supabase
-      .from('club_members')
-      .select('user_id, level')
-      .eq('club_id', club.id)
-      .eq('status', 'approved')
-      .then(({ data }) => {
-        const map: Record<string, string> = {}
-        for (const m of data ?? []) if (m.level) map[m.user_id as string] = m.level as string
-        setLevels(map)
-      })
-  }, [club.id])
+    if (!sessionId || !regKey) return
+    let alive = true
+    void supabase.rpc('session_player_meta', { p_session: sessionId }).then(({ data }) => {
+      if (!alive) return
+      const m: Record<string, { level?: string; gender?: 'M' | 'F' }> = {}
+      for (const x of (data ?? []) as { registration_id: string; level: string | null; gender: string | null }[])
+        m[x.registration_id] = { level: x.level ?? undefined, gender: x.gender === 'M' || x.gender === 'F' ? x.gender : undefined }
+      setMeta(m)
+    })
+    return () => {
+      alive = false
+    }
+  }, [sessionId, regKey])
 
   useEffect(() => {
     if (!s?.host_user_id || s.type !== 'flash') return
@@ -106,11 +109,6 @@ export default function SessionPage() {
       .select('id, name')
       .in('id', [s.club_id, s.partner_club_id].filter(Boolean) as string[])
       .then(({ data }) => setClubNames(Object.fromEntries(((data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]))))
-    void supabase.rpc('session_player_meta', { p_session: s.id }).then(({ data }) => {
-      const m: Record<string, string> = {}
-      for (const x of (data ?? []) as { registration_id: string; level: string | null }[]) if (x.level) m[x.registration_id] = x.level
-      setMetaLevels(m)
-    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchangeKey])
 
@@ -206,7 +204,22 @@ export default function SessionPage() {
   const counted = confirmed.filter((r) => (r.kind === 'member' || s.guests_in_capacity) && sideOfReg(r) === mySide)
   const orderOf = new Map(counted.map((r, i) => [r.id, i + 1]))
   const levelOf = (r: RegistrationRow) =>
-    r.kind === 'guest' ? (r.guest_level ?? undefined) : exchange ? metaLevels[r.id] : r.user_id ? levels[r.user_id] : undefined
+    r.kind === 'guest' ? (r.guest_level ?? undefined) : meta[r.id]?.level
+  const genderOf = (r: RegistrationRow): 'M' | 'F' | undefined => (r.kind === 'guest' ? (r.guest_gender ?? undefined) : meta[r.id]?.gender)
+  /** 남·여 인원 (성별을 안 넣은 사람은 따로) */
+  const genderCount = (list: RegistrationRow[]) => {
+    const m = list.filter((r) => genderOf(r) === 'M').length
+    const f = list.filter((r) => genderOf(r) === 'F').length
+    const none = list.length - m - f
+    return (
+      <span className="ml-2 text-[13px] font-semibold">
+        <span className="text-sky-700">남 {m}</span>
+        <span className="mx-1 text-ink-faint">·</span>
+        <span className="text-rose-600">여 {f}</span>
+        {none > 0 && <span className="ml-1 font-medium text-ink-faint">(미입력 {none})</span>}
+      </span>
+    )
+  }
   const myReg = regs.find((r) => r.kind === 'member' && r.user_id === uid) ?? null
   const myWaitlist = waitlist.filter((r) => sideOfReg(r) === mySide)
   const myPosition = myReg ? (myReg.status === 'confirmed' ? counted : myWaitlist).findIndex((r) => r.id === myReg.id) + 1 : 0
@@ -333,13 +346,14 @@ export default function SessionPage() {
           <div key={side}>
             <SectionTitle right={sideGuests > 0 ? `게스트 ${sideGuests}명 ${s.guests_in_capacity ? '포함' : '별도'}` : undefined}>
               {exchange ? nameOfClub(side) : '참석'} <span className="score text-[17px]">{sideCounted.length}/{cap}</span>
+              {sideConfirmed.length > 0 && genderCount(sideConfirmed)}
             </SectionTitle>
             {sideConfirmed.length === 0 ? (
               <Empty title="아직 신청한 사람이 없어요" />
             ) : (
               <List>
                 {sideConfirmed.map((r) => (
-                  <PersonRow key={r.id} index={(exchange ? sideOrder : orderOf).get(r.id) ?? null} r={r} level={levelOf(r)} me={r.user_id === uid} />
+                  <PersonRow key={r.id} index={(exchange ? sideOrder : orderOf).get(r.id) ?? null} r={r} level={levelOf(r)} gender={genderOf(r)} me={r.user_id === uid} />
                 ))}
               </List>
             )}
@@ -347,10 +361,11 @@ export default function SessionPage() {
               <>
                 <SectionTitle right="취소자가 생기면 순서대로 확정">
                   {exchange ? `${nameOfClub(side)} 대기` : '대기'} <span className="score text-[17px]">{sideWait.length}</span>
+                  {genderCount(sideWait)}
                 </SectionTitle>
                 <List>
                   {sideWait.map((r, i) => (
-                    <PersonRow key={r.id} index={i + 1} r={r} level={levelOf(r)} me={r.user_id === uid} />
+                    <PersonRow key={r.id} index={i + 1} r={r} level={levelOf(r)} gender={genderOf(r)} me={r.user_id === uid} />
                   ))}
                 </List>
               </>
@@ -391,7 +406,7 @@ function PartnerCapacityCard({ s, clubName, onChanged }: { s: SessionOverview; c
   )
 }
 
-function PersonRow({ index, r, level, me }: { index: number | null; r: RegistrationRow; level?: string; me: boolean }) {
+function PersonRow({ index, r, level, gender, me }: { index: number | null; r: RegistrationRow; level?: string; gender?: 'M' | 'F'; me: boolean }) {
   const name = r.kind === 'guest' ? r.guest_name : r.profiles?.display_name
   return (
     <div className={`flex items-center justify-between gap-2 px-4 py-3 ${me ? 'bg-court-50' : ''}`}>
@@ -400,6 +415,7 @@ function PersonRow({ index, r, level, me }: { index: number | null; r: Registrat
         <span className="min-w-0">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate font-medium text-ink">{name ?? '이름 없음'}</span>
+            <GenderMark g={gender} className="shrink-0" />
             {me && <Badge tone="court">나</Badge>}
             {level && <Badge tone="outline">{level}</Badge>}
             {r.kind === 'guest' && <Badge>게스트</Badge>}
