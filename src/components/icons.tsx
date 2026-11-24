@@ -112,3 +112,13 @@ export function IconBell({ className = 'h-6 w-6' }: P) {
     </svg>
   )
 }
+
+export function IconShare({ className = 'h-4 w-4' }: P) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden {...base}>
+      <path d="M12 3v12" />
+      <path d="M7 8l5-5 5 5" />
+      <path d="M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6" />
+    </svg>
+  )
+}

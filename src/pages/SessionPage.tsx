@@ -7,13 +7,13 @@ import { Field, Input } from '../components/form'
 import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { GuestCapacityField } from '../components/GuestCapacityField'
 import { LevelSelect, type Level } from '../components/LevelPicker'
-import { IconChevronLeft, IconChevronRight, IconCourt } from '../components/icons'
+import { IconChevronLeft, IconChevronRight, IconCourt, IconShare } from '../components/icons'
 import { useToast } from '../components/toast'
 import { Badge, Button, Card, Empty, List, Page, SectionTitle, Skeleton } from '../components/ui'
 import { DEFAULT_TZ, formatDateTime, formatTime, toDateInput, toTimeInput, trimSeconds, zonedToIso } from '../lib/datetime'
 import { useCountdownNow } from '../lib/serverTime'
-import { PHASE_LABEL, sessionPhase, type SessionPhase } from '../lib/sessionStatus'
-import { errorMessage, supabase } from '../lib/supabase'
+import { PHASE_LABEL, sessionPhase, sideCounts, type SessionPhase } from '../lib/sessionStatus'
+import { appRootUrl, errorMessage, supabase } from '../lib/supabase'
 import { resubscribeReload, useLatest, useRefetchOnResume } from '../lib/useResume'
 import { STATE_LABEL, tournamentActive } from '../lib/tournament'
 import type { Gender } from '../lib/autoDraft'
@@ -265,6 +265,7 @@ export default function SessionPage() {
         <p className="text-sm text-ink-soft">
           {s.place || '장소 미정'}, 코트 {s.court_count}면{hostName && `, ${hostName}님이 열었어요`}
         </p>
+        {phase !== 'canceled' && phase !== 'ended' && <ShareButton s={s} clubId={club.id} clubName={club.name} tz={tz} phase={phase} />}
         {exchange && s.partner_club_id && (
           <p className="mt-1 text-[15px] font-semibold text-ink">
             {nameOfClub(s.club_id)} <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span> {nameOfClub(s.partner_club_id)}
@@ -968,5 +969,54 @@ function ManageCard({ s, now, tz, onChanged }: { s: SessionOverview; now: number
         </div>
       )}
     </Card>
+  )
+}
+
+/** 운동 공유: 카톡 단톡방 등에 링크를 보내면 눌러서 바로 참석 신청 화면으로 */
+function ShareButton({ s, clubId, clubName, tz, phase }: { s: SessionOverview; clubId: string; clubName: string; tz: string; phase: SessionPhase }) {
+  const toast = useToast()
+  const share = async () => {
+    const url = new URL(`c/${clubId}/s/${s.id}`, appRootUrl()).toString()
+    const c = sideCounts(s, clubId)
+    const status =
+      phase === 'before_open'
+        ? `투표 ${formatDateTime(s.opens_at, tz)} 오픈`
+        : phase === 'full'
+          ? `정원 ${c.capacity}명 마감, 대기 신청 가능`
+          : phase === 'open'
+            ? `참석 ${c.confirmed}/${c.capacity}명`
+            : ''
+    const text = [
+      `[${clubName}] ${s.title}`,
+      `${formatDateTime(s.starts_at, tz)}~${formatTime(s.ends_at, tz)}${s.place ? ` · ${s.place}` : ''}`,
+      status,
+      '링크를 눌러 참석 신청해 주세요',
+    ]
+      .filter(Boolean)
+      .join('\n')
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: s.title, text, url })
+        return
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`)
+      toast.success('공유 문구와 링크를 복사했어요. 단톡방에 붙여 넣으세요')
+    } catch {
+      toast.error('복사하지 못했어요')
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void share()}
+      className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-black/10 bg-white px-3.5 text-sm font-semibold text-ink-soft active:bg-floor"
+    >
+      <IconShare className="h-4 w-4" />
+      공유하기
+    </button>
   )
 }

@@ -19,7 +19,7 @@ import LoginPage from './pages/LoginPage'
 import MePage from './pages/MePage'
 import FlashNewPage from './pages/FlashNewPage'
 import JoinPage from './pages/JoinPage'
-import { peekInvite, rememberInvite } from './lib/pendingInvite'
+import { clearReturn, peekReturn, rememberReturn } from './lib/pendingInvite'
 import MembersAdminPage from './pages/MembersAdminPage'
 import SessionPage from './pages/SessionPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -30,11 +30,14 @@ import TournamentPage from './pages/TournamentPage'
 function RequireAuth() {
   const { session, loading } = useAuth()
   const location = useLocation()
+  // 기억해 둔 화면에 도착했으면 지운다
+  useEffect(() => {
+    if (session && peekReturn() === location.pathname) clearReturn()
+  }, [session, location.pathname])
   if (loading) return <Page><Spinner /></Page>
   if (!session) {
-    // 초대 링크로 왔으면 로그인하고 돌아왔을 때 이어서 가입하도록 기억
-    const m = location.pathname.match(/^\/join\/([^/]+)/)
-    if (m) rememberInvite(m[1])
+    // 링크(초대·공유받은 운동)로 왔으면 로그인하고 돌아왔을 때 그 화면으로 이어지게 기억
+    rememberReturn(location.pathname)
     return <Navigate to="/login" replace />
   }
   return (
@@ -62,8 +65,12 @@ function ReadFromPush() {
 
 /** 루트: 마지막 동아리가 있으면 거기로, 없으면 동아리 선택 (승인 여부는 ClubLayout이 다시 확인) */
 function RootRedirect() {
-  const invite = peekInvite()
-  if (invite) return <Navigate to={`/join/${invite}`} replace />
+  const back = peekReturn()
+  // 한 번 데려다주면 지운다 (그 화면이 다른 곳으로 보내도 다음에 또 끌려가지 않게)
+  useEffect(() => {
+    if (back) clearReturn()
+  }, [back])
+  if (back) return <Navigate to={back} replace />
   const last = getLastClubId()
   return <Navigate to={last ? `/c/${last}` : '/clubs'} replace />
 }

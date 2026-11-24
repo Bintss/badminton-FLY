@@ -7,7 +7,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { ListSkeleton, Page, Spinner } from '../components/ui'
 import { Sheet } from '../components/Sheet'
 import { setLastClubId } from '../lib/lastClub'
-import { supabase } from '../lib/supabase'
+import { errorMessage, supabase } from '../lib/supabase'
 import { CLUB_COLUMNS, type Club, type ClubMember } from '../lib/types'
 import { ClubLogo } from '../components/ClubLogo'
 
@@ -66,9 +66,9 @@ export default function ClubLayout() {
 
   if (!state.loaded) return <Page><Spinner /></Page>
 
-  if (!state.club || !state.me || !allowed) {
-    return <Navigate to="/clubs" replace />
-  }
+  if (!state.club) return <Navigate to="/clubs" replace />
+  // 회원이 아닌 사람이 공유받은 링크로 들어온 경우: 말없이 목록으로 보내지 않고 가입 신청으로 안내
+  if (!state.me || !allowed) return <NotMember club={state.club} me={state.me} sharedSession={pathname.includes('/s/')} onChanged={load} />
 
   const value: ClubState = { club: state.club, me: state.me, isAdmin: state.me.role === 'admin', reload: load }
 
@@ -209,5 +209,52 @@ function ClubSwitcher({ currentId, onClose }: { currentId: string; onClose: () =
         </Link>
       </div>
     </Sheet>
+  )
+}
+
+/** 회원이 아닐 때: 공유받은 운동 링크 등으로 들어오면 가입 신청으로 안내 */
+function NotMember({ club, me, sharedSession, onChanged }: { club: Club; me: ClubMember | null; sharedSession: boolean; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const request = async () => {
+    setBusy(true)
+    setError(null)
+    const { error } = await supabase.rpc('request_join', { p_club: club.id })
+    setBusy(false)
+    if (error) setError(errorMessage(error))
+    await onChanged()
+  }
+  const banned = !!me?.banned_at
+  const pending = me?.status === 'pending'
+  return (
+    <Page title="동아리 가입">
+      <div className="flex flex-col items-center rounded-2xl bg-white px-5 py-8 text-center">
+        <ClubLogo club={club} size={72} />
+        <p className="mt-4 text-[20px] font-bold text-ink">{club.name}</p>
+        {banned ? (
+          <p className="mt-2 text-sm text-ink-soft">이 동아리에는 가입할 수 없어요.</p>
+        ) : pending ? (
+          <p className="mt-2 text-sm text-ink-soft">가입 신청을 보냈어요. 운영진이 승인하면 바로 볼 수 있어요.</p>
+        ) : (
+          <>
+            <p className="mt-2 text-sm text-ink-soft">
+              {sharedSession ? '공유받은 운동은 이 동아리 회원만 볼 수 있어요. 가입 신청하고 승인되면 참석할 수 있어요.' : '이 동아리 회원만 볼 수 있어요.'}
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void request()}
+              className="mt-6 h-14 w-full rounded-2xl bg-court-600 text-[17px] font-semibold text-white active:bg-court-700 disabled:opacity-60"
+            >
+              {busy ? '신청하는 중' : '가입 신청'}
+            </button>
+          </>
+        )}
+        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      </div>
+      <Link to="/clubs" className="mt-4 block text-center text-sm font-medium text-ink-soft underline underline-offset-2">
+        동아리 목록으로
+      </Link>
+    </Page>
   )
 }

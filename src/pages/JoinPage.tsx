@@ -4,7 +4,6 @@ import { ClubLogo } from '../components/ClubLogo'
 import { useToast } from '../components/toast'
 import { Button, Card, Empty, ListSkeleton, Page } from '../components/ui'
 import { setLastClubId } from '../lib/lastClub'
-import { clearInvite } from '../lib/pendingInvite'
 import { errorMessage, supabase } from '../lib/supabase'
 
 interface InviteInfo {
@@ -22,8 +21,6 @@ export default function JoinPage() {
   const toast = useToast()
   const [info, setInfo] = useState<InviteInfo | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => clearInvite(), [])
 
   useEffect(() => {
     let alive = true
