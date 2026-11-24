@@ -108,8 +108,8 @@ select array_agg(id order by seq)::text as regs from registrations where session
 select create_match(:'s1', array[(:'regs'::uuid[])[1], (:'regs'::uuid[])[2], (:'regs'::uuid[])[3], :'g'::uuid]);
 reset role;
 select pg_temp.ok((select count(*) from notifications where kind = 'court_assigned' and session_id = :'s1') = 3, '코트 배정 → 회원 선수 3명에게 (게스트 제외)');
-select pg_temp.ok((select title = '코트 1에서 경기 시작' and body like '함께: %게스트 철수%' from notifications where kind = 'court_assigned' and user_id = pg_temp.u(1)),
-  '자율 경기: 함께 치는 사람 이름');
+select pg_temp.ok((select title = '코트 1에서 경기 시작' and body like '파트너 %, 상대 %게스트 철수%' from notifications where kind = 'court_assigned' and user_id = pg_temp.u(1)),
+  '자율 경기: 고른 순서대로 파트너·상대 이름');
 select pg_temp.ok((select url = '/c/' || :'club' || '/s/' || :'s1' || '/board' from notifications where kind = 'court_assigned' and user_id = pg_temp.u(1)), '대진판으로 이동');
 -- 이미 진행 중인 경기가 다시 갱신돼도 중복 알림 없음
 update matches set status = status where session_id = :'s1';

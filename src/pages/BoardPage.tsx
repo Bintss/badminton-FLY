@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useClub } from '../club/ClubLayout'
 import { ConfirmButton } from '../components/ConfirmButton'
 import { ScoreSheet, type ScoreKind } from '../components/ScoreSheet'
-import { GenderToggle } from '../components/GenderToggle'
+import { GenderMark, GenderToggle } from '../components/GenderToggle'
 import { LevelSelect, type Level } from '../components/LevelPicker'
 import { particle } from '../lib/josa'
 import { Input } from '../components/form'
@@ -51,6 +51,7 @@ interface MatchRow {
 interface Player extends PlayerStat {
   name: string
   level?: string
+  gender?: 'M' | 'F'
   restMin: number | null // 체크인 전이면 null
 }
 
@@ -98,15 +99,16 @@ export default function BoardPage() {
   const [stats, setStats] = useState<PlayerStat[]>([])
   const [matches, setMatches] = useState<MatchRow[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
-  const [levels, setLevels] = useState<Record<string, string>>({})
+  const [meta, setMeta] = useState<Record<string, { level?: string; gender?: 'M' | 'F' }>>({})
   const [canOperate, setCanOperate] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
   const take = useLatest()
-  const load = useCallback(async () => {
+  /** silent: 실시간·주기 갱신처럼 뒤에서 읽을 때는 잠깐 끊겨도 오류 창을 띄우지 않는다 */
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!sessionId) return
     const ticket = take()
-    const [ov, st, ms, rs] = await Promise.all([
+    const [ov, st, ms, rs, op] = await Promise.all([
       supabase.from('session_overview').select('*').eq('id', sessionId).maybeSingle(),
       supabase.from('session_player_stats').select('*').eq('session_id', sessionId),
       supabase
@@ -118,10 +120,16 @@ export default function BoardPage() {
         .from('registrations')
         .select('id, guest_name, profiles!registrations_user_id_fkey(display_name)')
         .eq('session_id', sessionId),
+      // 조작 권한은 시간(시작 3시간 전부터)·참석 확정에 따라 바뀌므로 매번 다시 확인
+      supabase.rpc('can_operate_board', { p_session: sessionId }),
     ])
     if (!take.isLatest(ticket)) return // 더 최근 요청이 있으면 이 응답은 버린다
     const err = ov.error ?? st.error ?? ms.error ?? rs.error
-    if (err) toast.error(errorMessage(err))
+    if (err) {
+      if (!opts?.silent) toast.error(errorMessage(err))
+      return // 실패한 응답으로 화면을 비우지 않는다
+    }
+    if (!op.error) setCanOperate(Boolean(op.data))
     setS((ov.data as SessionOverview | null) ?? null)
     setStats((st.data as PlayerStat[] | null) ?? [])
     setMatches((ms.data as MatchRow[] | null) ?? [])
@@ -136,12 +144,7 @@ export default function BoardPage() {
   useEffect(() => {
     void load()
   }, [load])
-  useRefetchOnResume(load)
-
-  useEffect(() => {
-    if (!sessionId) return
-    supabase.rpc('can_operate_board', { p_session: sessionId }).then(({ data }) => setCanOperate(Boolean(data)))
-  }, [sessionId])
+  useRefetchOnResume(() => load({ silent: true }))
 
   // 급수: 회원·게스트·교류전 상대 회원 모두 (등록 단위). 명단이 바뀌면 다시 읽는다
   const regKey = stats.map((p) => p.registration_id).sort().join(',')
@@ -150,9 +153,10 @@ export default function BoardPage() {
     let alive = true
     void supabase.rpc('session_player_meta', { p_session: sessionId }).then(({ data }) => {
       if (!alive) return
-      const map: Record<string, string> = {}
-      for (const m of (data as { registration_id: string; level: string | null }[] | null) ?? []) if (m.level) map[m.registration_id] = m.level
-      setLevels(map)
+      const map: Record<string, { level?: string; gender?: 'M' | 'F' }> = {}
+      for (const m of (data as { registration_id: string; level: string | null; gender: string | null }[] | null) ?? [])
+        map[m.registration_id] = { level: m.level ?? undefined, gender: m.gender === 'M' || m.gender === 'F' ? m.gender : undefined }
+      setMeta(map)
     })
     return () => {
       alive = false
@@ -167,17 +171,34 @@ export default function BoardPage() {
       if (reloadTimer.current) return
       reloadTimer.current = setTimeout(() => {
         reloadTimer.current = null
-        void load()
+        void load({ silent: true })
       }, 300 + Math.random() * 400)
     }
+    // 실시간 연결 상태. 끊겨 있는 동안은 10초마다, 연결돼 있어도 60초마다 한 번 새로 읽는다
+    // (폰 네트워크에서 연결이 조용히 죽어 이벤트가 안 오는 경우 대비)
+    let live = false
+    let lastLoad = Date.now()
+    const reconnect = resubscribeReload(() => load({ silent: true }))
+    const poll = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (!live || Date.now() - lastLoad > 60_000) {
+        lastLoad = Date.now()
+        void load({ silent: true })
+      }
+    }, 10_000)
     const channel = supabase
       .channel(`board:${sessionId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches', filter: `session_id=eq.${sessionId}` }, schedule)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations', filter: `session_id=eq.${sessionId}` }, schedule)
       // 대회 확정·확정 취소·종료처럼 세션만 바뀌는 경우에도 대진판 모드가 바로 바뀌게
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions', filter: `id=eq.${sessionId}` }, schedule)
-      .subscribe(resubscribeReload(load))
+      .subscribe((status) => {
+        live = status === 'SUBSCRIBED'
+        if (live) lastLoad = Date.now()
+        reconnect(status)
+      })
     return () => {
+      clearInterval(poll)
       if (reloadTimer.current) clearTimeout(reloadTimer.current)
       reloadTimer.current = null
       void supabase.removeChannel(channel)
@@ -194,7 +215,8 @@ export default function BoardPage() {
         return {
           ...p,
           name: names[p.registration_id] ?? p.guest_name ?? '이름 없음',
-          level: levels[p.registration_id],
+          level: meta[p.registration_id]?.level,
+          gender: meta[p.registration_id]?.gender,
           restMin: p.checked_in_at ? Math.max(0, Math.floor((now - since) / 60000)) : null,
         }
       })
@@ -205,7 +227,7 @@ export default function BoardPage() {
         if ((b.restMin ?? 0) !== (a.restMin ?? 0)) return (b.restMin ?? 0) - (a.restMin ?? 0)
         return a.seq - b.seq
       })
-  }, [stats, names, levels, now])
+  }, [stats, names, meta, now])
 
   const byId = useMemo(() => Object.fromEntries(players.map((p) => [p.registration_id, p])), [players])
   // 대회 모드: 대회 경기만 돌아간다. 확정 전 초안(운영진에게만 보임)은 대진판에 섞지 않는다
@@ -382,7 +404,8 @@ function Courts({
   }
 
   return (
-    <section className="grid gap-3 sm:grid-cols-2">
+    // 코트는 두 줄로: 폰에서도 코트 4면이 한 화면 안에 들어오고 참석자 목록이 덜 밀려나게
+    <section className="grid grid-cols-2 gap-x-3 gap-y-4">
       {courts.map((no) => {
         const m = playing.find((x) => x.court_no === no)
         const sides = m ? teamsOf(m.match_players) : [[], []]
@@ -391,28 +414,26 @@ function Courts({
         const nextWhy = next ? blockReason(next as unknown as ScheduledMatch, info) : null
         return (
           <div key={no}>
-            <div className="mb-1.5 flex items-baseline justify-between px-1">
-              <span className="text-[13px] font-bold text-ink-soft">
-                코트 <span className="score text-[18px] text-ink">{no}</span>
-                {m?.phase === 'scheduled' && (
-                  <span className="ml-2 font-semibold text-court-600">
-                    매치 {m.round_no}
-                  </span>
-                )}
+            <div className="mb-1 flex items-baseline justify-between px-0.5">
+              <span className="text-[12px] font-bold text-ink-soft">
+                코트 <span className="score text-[17px] text-ink">{no}</span>
+                {m?.phase === 'scheduled' && <span className="ml-1.5 font-semibold text-court-600">매치 {m.round_no}</span>}
               </span>
               {m?.started_at && (
-                <span className="score text-[17px] font-semibold text-ink-soft">{Math.max(0, Math.floor((now - Date.parse(m.started_at)) / 60000))}분</span>
+                <span className="score text-[15px] font-semibold text-ink-soft">{Math.max(0, Math.floor((now - Date.parse(m.started_at)) / 60000))}분</span>
               )}
             </div>
-            {/* 빈 코트는 납작하게: 4면이 다 비어도 참석자 목록이 너무 밀려나지 않게 */}
-            <div className={`relative overflow-hidden rounded-2xl ${m ? 'aspect-[2.2/1] bg-court-600' : 'aspect-[4.4/1] border border-dashed border-court-200 bg-court-50 sm:aspect-[2.2/1]'}`}>
+            <div className={`relative aspect-[1.55/1] overflow-hidden rounded-xl ${m ? 'bg-court-600' : 'border border-dashed border-court-200 bg-court-50'}`}>
               <CourtLines empty={!m} />
               {m ? (
                 <div className="absolute inset-0 grid grid-cols-2">
                   {sides.map((side, i) => (
-                    <div key={i} className="flex flex-col items-center justify-center gap-2 px-3">
+                    <div key={i} className="flex min-w-0 flex-col items-center justify-center gap-1.5 px-1">
                       {side.map((id) => (
-                        <span key={id} className="max-w-full truncate rounded-md bg-court-700/55 px-2 py-0.5 text-[16px] font-bold text-white">
+                        <span
+                          key={id}
+                          className={`max-w-full truncate rounded-md bg-court-700/60 px-1.5 py-0.5 font-bold leading-tight text-white ${nameOf(id).length > 4 ? 'text-[13px]' : 'text-[15px]'}`}
+                        >
                           {nameOf(id)}
                         </span>
                       ))}
@@ -420,34 +441,36 @@ function Courts({
                   ))}
                 </div>
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center px-3">
-                  <span className="rounded-md bg-court-50/90 px-2 py-0.5 text-center text-sm font-medium text-court-700">
+                <div className="absolute inset-0 flex items-center justify-center p-2">
+                  <span className="line-clamp-3 rounded-md bg-court-50/90 px-1.5 py-0.5 text-center text-[13px] font-medium leading-snug text-court-700">
                     {next ? `매치 ${next.round_no} 기다리는 중${nextWhy ? ` · ${nextWhy}` : ''}` : '비어 있음'}
                   </span>
                 </div>
               )}
             </div>
             {m && canOperate && (
-              <div className="mt-2 flex gap-2">
+              <div className="mt-1.5 flex gap-1.5">
                 {(m.phase === 'free' || isAdmin) && (
                   <ConfirmButton
-                    label="취소"
-                    confirmLabel="경기 취소"
-                    className="h-11 border border-black/10 bg-white px-4 text-[15px] text-ink-soft"
+                    label={<IconX />}
+                    ariaLabel={`코트 ${no} 경기 취소`}
+                    confirmLabel="취소"
+                    className="h-10 w-10 shrink-0 border border-black/10 bg-white text-ink-soft"
+                    armedClassName="h-10 shrink-0 bg-danger px-2.5 text-sm text-white"
                     disabled={busy === m.id}
                     onConfirm={() => void act(m, 'cancel_match')}
                   />
                 )}
                 {m.phase === 'scheduled' ? (
-                  <Button className="h-11 flex-1 bg-ink text-[15px] text-white" disabled={busy === m.id} onClick={() => setScoring(m)}>
-                    경기 종료 · 점수
+                  <Button className="h-10 flex-1 bg-ink px-2 text-[14px] text-white" disabled={busy === m.id} onClick={() => setScoring(m)}>
+                    종료 · 점수
                   </Button>
                 ) : (
                   <ConfirmButton
                     label="경기 종료"
-                    confirmLabel="한 번 더 누르면 종료"
-                    className="h-11 flex-1 bg-ink text-[15px] text-white"
-                    armedClassName="h-11 flex-1 bg-court-700 text-[15px] text-white"
+                    confirmLabel="한 번 더"
+                    className="h-10 flex-1 bg-ink px-2 text-[14px] text-white"
+                    armedClassName="h-10 flex-1 bg-court-700 px-2 text-[14px] text-white"
                     disabled={busy === m.id}
                     onConfirm={() => void act(m, 'finish_match')}
                   />
@@ -511,7 +534,11 @@ function Queue({
           {queued.map((m, i) => (
             <div key={m.id} className="flex items-center gap-2 px-3 py-2.5">
               <span className="score w-6 shrink-0 text-center text-[20px] font-semibold text-court-600">{i + 1}</span>
-              <span className="min-w-0 flex-1 text-[15px] leading-snug text-ink">{m.match_players.map((p) => nameOf(p.registration_id)).join(', ')}</span>
+              <span className="min-w-0 flex-1 text-[15px] leading-snug text-ink">
+                <span className="whitespace-nowrap">{teamsOf(m.match_players)[0].map(nameOf).join(', ')}</span>{' '}
+                <span className="px-0.5 text-xs font-bold text-ink-faint">vs</span>{' '}
+                <span className="whitespace-nowrap">{teamsOf(m.match_players)[1].map(nameOf).join(', ')}</span>
+              </span>
               {canOperate && (
                 <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -680,6 +707,12 @@ function Players({
     return p && (p.is_playing || p.queued_count > 0)
   })
   const arrivedCount = players.filter((p) => p.restMin !== null).length
+  // 쉬는 사람(경기 만들 사람)을 맨 위에 모으고, 경기 중·대기와 안 온 사람은 아래로
+  const groups: { key: 'idle' | 'busy' | 'away'; title: string; list: Player[] }[] = [
+    { key: 'idle', title: tournament ? '쉬는 사람' : '쉬는 사람 · 게임 적은 순', list: players.filter((p) => p.restMin !== null && !p.is_playing && p.queued_count === 0) },
+    { key: 'busy', title: tournament ? '경기 중 · 남은 경기 있음' : '경기 중 · 대기', list: players.filter((p) => p.restMin !== null && (p.is_playing || p.queued_count > 0)) },
+    { key: 'away', title: '아직 안 옴', list: players.filter((p) => p.restMin === null) },
+  ]
 
   const toggle = (id: string) => {
     setWarned(false)
@@ -734,82 +767,110 @@ function Players({
       <SectionTitle right={`도착 ${arrivedCount}/${players.length}`}>참석자</SectionTitle>
       {canOperate && (
         <p className="-mt-1 mb-2 text-xs text-ink-faint">
-          {tournament ? '대회 중에는 경기를 새로 만들지 않아요. 도착한 사람만 눌러주세요.' : '게임 수가 적은 순서예요. 4명을 눌러 경기를 만들어요.'}
+          {tournament ? '대회 중에는 경기를 새로 만들지 않아요. 온 사람은 도착을 눌러 주세요.' : '4명을 눌러 경기를 만들어요. 선택한 순서대로 1·2번이 한 팀, 3·4번이 한 팀이에요.'}
         </p>
       )}
       {players.length === 0 ? (
         <Empty title="참석 확정자가 없어요" />
       ) : (
-        <List>
-          {players.map((p) => {
-            const isSel = valid.includes(p.registration_id)
-            const arrived = p.restMin !== null
-            const idle = arrived && !p.is_playing && p.queued_count === 0
-            const longRest = idle && (p.restMin ?? 0) >= REST_ALERT_MIN
-            return (
-              <div
-                key={p.registration_id}
-                role={selectable ? 'button' : undefined}
-                aria-pressed={selectable ? isSel : undefined}
-                tabIndex={selectable ? 0 : undefined}
-                onClick={selectable ? () => toggle(p.registration_id) : undefined}
-                onKeyDown={selectable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(p.registration_id)) : undefined}
-                className={`relative flex min-h-16 items-center gap-3 px-3 py-2.5 ${isSel ? 'bg-court-50' : longRest && !tournament ? 'bg-shuttle-100/70' : ''} ${selectable ? 'cursor-pointer select-none active:bg-floor' : ''}`}
-              >
-                {isSel && <span className="absolute inset-y-0 left-0 w-1 bg-court-600" aria-hidden />}
-                <span className={`score w-9 shrink-0 text-center text-[28px] font-semibold leading-none ${arrived ? 'text-ink' : 'text-ink-faint'}`} aria-label={`${p.games}게임`}>
-                  {p.games}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`truncate text-[16px] font-semibold ${arrived ? 'text-ink' : 'text-ink-faint'}`}>{p.name}</span>
-                    {p.level && <Badge tone="outline">{p.level}</Badge>}
-                    {p.kind === 'guest' && <Badge>게스트</Badge>}
-                  </div>
-                  <p className={`text-[13px] ${longRest ? 'font-semibold text-shuttle-800' : 'text-ink-soft'}`}>
-                    {!arrived
-                      ? p.late_eta
-                        ? `아직 안 왔어요, ${trimSeconds(p.late_eta)} 도착 예정`
-                        : '아직 안 왔어요'
-                      : p.is_playing
-                        ? '경기 중'
-                        : p.queued_count > 0
-                          ? tournament
-                            ? `대회 경기 ${p.queued_count}개 남음`
-                            : `대기 경기 ${p.queued_count}개에 있어요`
-                          : `${p.restMin}분째 쉬는 중`}
+        <div className="space-y-4">
+          {groups.map(
+            (g) =>
+              g.list.length > 0 && (
+                <div key={g.key}>
+                  <p className="mb-1.5 px-0.5 text-[13px] font-semibold text-ink-soft">
+                    {g.title} <span className="score text-[15px] text-ink">{g.list.length}</span>
                   </p>
+                  {g.key === 'away' ? (
+                    <List>
+                      {g.list.map((p) => (
+                        <div key={p.registration_id} className="flex items-center gap-2 px-3 py-2">
+                          <div className="min-w-0 flex-1">
+                            <span className="flex items-center gap-1.5">
+                              <span className="truncate text-[15px] font-semibold text-ink-faint">{p.name}</span>
+                              <GenderMark g={p.gender} />
+                              {p.level && <Badge tone="outline">{p.level}</Badge>}
+                              {p.kind === 'guest' && <Badge>게스트</Badge>}
+                            </span>
+                            {p.late_eta && <span className="block text-xs text-ink-faint">{trimSeconds(p.late_eta)} 도착 예정</span>}
+                          </div>
+                          {canOperate && (
+                            <button
+                              className="h-10 shrink-0 rounded-xl bg-court-600 px-3.5 text-sm font-semibold text-white active:bg-court-700"
+                              onClick={() => void setCheckIn(p, true)}
+                            >
+                              도착
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </List>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {g.list.map((p) => {
+                        const isSel = valid.includes(p.registration_id)
+                        const idle = g.key === 'idle'
+                        const longRest = idle && !tournament && (p.restMin ?? 0) >= REST_ALERT_MIN
+                        return (
+                          <div
+                            key={p.registration_id}
+                            role={selectable ? 'button' : undefined}
+                            aria-pressed={selectable ? isSel : undefined}
+                            tabIndex={selectable ? 0 : undefined}
+                            onClick={selectable ? () => toggle(p.registration_id) : undefined}
+                            onKeyDown={selectable ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle(p.registration_id)) : undefined}
+                            className={`relative rounded-xl border px-2.5 py-2 ${
+                              isSel
+                                ? 'border-court-600 bg-court-50 ring-1 ring-court-600'
+                                : longRest
+                                  ? 'border-shuttle-200 bg-shuttle-100/70'
+                                  : idle
+                                    ? 'border-black/[0.07] bg-white'
+                                    : 'border-transparent bg-black/[0.035]'
+                            } ${selectable ? 'cursor-pointer select-none active:scale-[0.98]' : ''}`}
+                          >
+                            <div className="flex items-center gap-1">
+                              <span className={`truncate text-[16px] font-bold ${idle ? 'text-ink' : 'text-ink-soft'}`}>{p.name}</span>
+                              <GenderMark g={p.gender} className="shrink-0" />
+                              {isSel && (
+                                <span className="score ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-court-600 text-[13px] font-bold text-white">
+                                  {valid.indexOf(p.registration_id) + 1}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-soft">
+                              {p.level && <span className="font-semibold text-ink">{p.level}</span>}
+                              {p.kind === 'guest' && <span>게스트</span>}
+                              <span className="score text-[13px]">{p.games}게임</span>
+                              <span className={`ml-auto shrink-0 ${longRest ? 'font-semibold text-shuttle-800' : !idle ? 'font-semibold text-court-600' : ''}`}>
+                                {idle
+                                  ? `${p.restMin}분`
+                                  : p.is_playing
+                                    ? '경기 중'
+                                    : tournament
+                                      ? `${p.queued_count}경기 남음`
+                                      : '대기'}
+                              </span>
+                            </div>
+                            {canOperate && idle && p.games === 0 && !isSel && (
+                              <ConfirmButton
+                                label={<IconUndo className="h-4 w-4" />}
+                                ariaLabel={`${p.name} 도착 취소`}
+                                confirmLabel="도착 취소"
+                                className="absolute right-1 top-1 h-7 w-7 text-ink-faint active:bg-black/5"
+                                armedClassName="absolute right-1 top-1 h-7 bg-danger/10 px-2 text-xs text-danger"
+                                onConfirm={() => void setCheckIn(p, false)}
+                              />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-
-                {isSel && <Badge tone="court">선택 {valid.indexOf(p.registration_id) + 1}</Badge>}
-                {!isSel && p.is_playing && <Badge tone="court">경기 중</Badge>}
-                {!isSel && !p.is_playing && p.queued_count > 0 && <Badge tone="shuttle">대기</Badge>}
-
-                {canOperate && !arrived && (
-                  <button
-                    className="h-10 shrink-0 rounded-xl bg-court-600 px-3.5 text-sm font-semibold text-white active:bg-court-700"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void setCheckIn(p, true)
-                    }}
-                  >
-                    도착
-                  </button>
-                )}
-                {canOperate && arrived && idle && p.games === 0 && !isSel && (
-                  <ConfirmButton
-                    label={<IconUndo />}
-                    ariaLabel={`${p.name} 도착 취소`}
-                    confirmLabel="도착 취소"
-                    className="h-10 w-10 shrink-0 text-ink-faint active:bg-black/5"
-                    armedClassName="h-10 shrink-0 px-3 bg-danger/10 text-danger text-sm"
-                    onConfirm={() => void setCheckIn(p, false)}
-                  />
-                )}
-              </div>
-            )
-          })}
-        </List>
+              ),
+          )}
+        </div>
       )}
       <p className="mt-2 text-xs leading-relaxed text-ink-faint">
         {REST_ALERT_MIN}분 넘게 쉰 사람은 노란색이에요. 쉰 시간은 도착한 때부터 세서, 늦게 온 사람이 불리하지 않아요.
@@ -833,7 +894,10 @@ function Players({
         <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 border-t border-black/[0.08] bg-white/95 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur">
           <div className="mx-auto max-w-md px-4 py-3">
             <p className="mb-2 truncate text-sm text-ink">
-              {valid.map((id) => players.find((p) => p.registration_id === id)?.name).join(', ')}
+              {(() => {
+                const n = valid.map((id) => players.find((p) => p.registration_id === id)?.name ?? '')
+                return n.length > 2 ? `${n.slice(0, 2).join(', ')}  vs  ${n.slice(2).join(', ')}` : n.join(', ')
+              })()}
             </p>
             {warned && busyPeople.length > 0 && (
               <p className="mb-2 rounded-lg bg-shuttle-100 px-3 py-2 text-sm text-shuttle-800">
